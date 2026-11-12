@@ -73,11 +73,8 @@ func (it Item) Subtitle() string {
 		return strings.Join(parts, " · ")
 	}
 	parts := []string{}
-	if it.Series != "" {
-		parts = append(parts, it.Series)
-		if label := it.EpisodeLabel(); label != "" {
-			parts = append(parts, label)
-		}
+	if label := it.EpisodeLabel(); label != "" {
+		parts = append(parts, label)
 	}
 	parts = append(parts, strings.ToUpper(strings.TrimPrefix(it.Ext, ".")))
 	parts = append(parts, HumanSize(it.Size))

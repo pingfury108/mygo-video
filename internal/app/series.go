@@ -88,3 +88,61 @@ func (a *app) episodeChip(c *ui.Context, ep media.Item, current bool) {
 		})
 	})
 }
+
+// groupSeries folds the episodes of a series into the one card they
+// deserve: the episode the listener is on, or the newest.
+func (a *app) groupSeries(items []media.Item) []media.Item {
+	out := make([]media.Item, 0, len(items))
+	at := map[string]int{}
+	for _, it := range items {
+		if it.Series == "" {
+			out = append(out, it)
+			continue
+		}
+		if i, ok := at[it.Series]; ok {
+			if a.betterEpisode(it, out[i]) {
+				out[i] = it
+			}
+			continue
+		}
+		at[it.Series] = len(out)
+		out = append(out, it)
+	}
+	return out
+}
+
+// betterEpisode says whether b is the episode a series' card should show
+// instead of a: the one being watched, else the latest.
+func (a *app) betterEpisode(b, a1 media.Item) bool {
+	pb, okb := a.store.Progress(b.ID)
+	pa, oka := a.store.Progress(a1.ID)
+	sb := okb && pb.Started()
+	sa := oka && pa.Started()
+	if sb != sa {
+		return sb
+	}
+	if sb && sa {
+		return pb.Updated > pa.Updated
+	}
+	if b.Season != a1.Season {
+		return b.Season > a1.Season
+	}
+	return b.Episode > a1.Episode
+}
+
+// seriesLine is what a series' card says under its name: how many episodes
+// there are, and which one the listener is on.
+func (a *app) seriesLine(it media.Item) string {
+	if it.Series == "" {
+		return ""
+	}
+	eps := a.seriesOf(it)
+	if len(eps) < 2 {
+		return ""
+	}
+	if prog, ok := a.store.Progress(it.ID); ok && prog.Started() {
+		return fmt.Sprintf("全 %d 集 · 看到 %s", len(eps), it.EpisodeLabel())
+	}
+	last := eps[len(eps)-1]
+	return fmt.Sprintf("全 %d 集 · 更新至 %s", len(eps), last.EpisodeLabel())
+}

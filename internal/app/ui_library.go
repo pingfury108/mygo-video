@@ -13,7 +13,7 @@ import (
 // libraryPage is every video in a grid.
 func (a *app) libraryPage(c *ui.Context) {
 	p := colors()
-	items := a.items()
+	items := a.groupSeries(a.items())
 	ui.Row(c).Height(56).PaddingX(32).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
 		ui.Text(c, "片库").FontSize(15).FontWeight(600)
 		ui.Text(c, a.libraryLine()).FontSize(12).TextColor(p.faint)
@@ -156,11 +156,11 @@ func (a *app) searchResults() []media.Item {
 				out = append(out, it)
 			}
 		}
-		return out
+		return a.groupSeries(out)
 	case a.source >= 2:
-		return a.pluginSearch
+		return a.groupSeries(a.pluginSearch)
 	default:
-		return a.results()
+		return a.groupSeries(a.results())
 	}
 }
 

@@ -171,12 +171,29 @@ var junk = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k|8k|uhd|bluray|blu
 
 var seriesPattern = regexp.MustCompile(`(?i)(.+?)[\s._-]+s(\d{1,2})[\s._-]*e(\d{1,3})`)
 
+// crossPattern reads "Show 1x05", and the others the ways Chinese sites and
+// releases name an episode without a season.
+var (
+	crossPattern = regexp.MustCompile(`(?i)(.+?)[\s._-]+(\d{1,2})x(\d{1,3})`)
+	epPattern    = regexp.MustCompile(`(?i)(.+?)[\s._-]+(?:ep?)[\s._-]?(\d{1,3})`)
+	cnPattern    = regexp.MustCompile(`(.+?)[\s._-]*第\s*(\d{1,3})\s*[集话]`)
+)
+
 // ParseName reads a file name: its title, and the season and episode it
-// says, as "Fog Harbour S02E05".
+// says, as "Fog Harbour S02E05", "Show 1x05", "Show E05" or "雾港 第05集".
 func ParseName(base string) (title string, season, episode int) {
 	name := cleanName(base)
 	if m := seriesPattern.FindStringSubmatch(name); m != nil {
 		return strings.TrimSpace(m[1]), atoi(m[2]), atoi(m[3])
+	}
+	if m := crossPattern.FindStringSubmatch(name); m != nil {
+		return strings.TrimSpace(m[1]), atoi(m[2]), atoi(m[3])
+	}
+	if m := cnPattern.FindStringSubmatch(name); m != nil {
+		return strings.TrimSpace(m[1]), 0, atoi(m[2])
+	}
+	if m := epPattern.FindStringSubmatch(name); m != nil {
+		return strings.TrimSpace(m[1]), 0, atoi(m[2])
 	}
 	return name, 0, 0
 }

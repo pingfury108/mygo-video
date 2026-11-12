@@ -96,7 +96,11 @@ func (a *app) videoCard(c *ui.Context, it media.Item, width float32) {
 		ui.Column(c).Grow(1).Gap(7).Children(func() {
 			a.thumb(c, it, prog)
 			ui.Text(c, it.Name).FontSize(13).FontWeight(600).SingleLine()
-			ui.Text(c, it.Subtitle()).FontSize(11).TextColor(p.faint).SingleLine()
+			sub := it.Subtitle()
+			if line := a.seriesLine(it); line != "" {
+				sub = line
+			}
+			ui.Text(c, sub).FontSize(11).TextColor(p.faint).SingleLine()
 		})
 	})
 }

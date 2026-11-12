@@ -52,14 +52,19 @@ func (a *app) homePage(c *ui.Context) {
 				a.continueHero(c, lead)
 			}
 
-			newest := items
+			newest := a.groupSeries(items)
 			if hasLead {
-				newest = make([]media.Item, 0, len(items))
-				for _, it := range items {
-					if it.ID != lead.ID {
-						newest = append(newest, it)
+				filtered := make([]media.Item, 0, len(newest))
+				for _, it := range newest {
+					if it.ID == lead.ID {
+						continue
 					}
+					if lead.Series != "" && it.Series == lead.Series {
+						continue
+					}
+					filtered = append(filtered, it)
 				}
+				newest = filtered
 			}
 			if len(newest) > 0 {
 				ui.Column(c).Gap(12).Children(func() {
