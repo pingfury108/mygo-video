@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -122,6 +123,14 @@ type app struct {
 	webdavBusy      bool
 	webdavErr       string
 	webdavScroll    ui.ScrollState
+
+	// The scan of every folder below the one showing.
+	webdavAll      bool
+	webdavScanning bool
+	webdavScanned  int
+	webdavFound    int
+	webdavAllItems []media.Item
+	webdavGen      int32
 
 	// history and forward are the pages gone back from and forward to,
 	// for the sidebar's arrows.
@@ -355,7 +364,7 @@ func (a *app) items() []media.Item {
 	case sourceLocal:
 		return a.lib.Items()
 	case sourceWebDAV:
-		return a.webdavVideos
+		return a.webdavItems()
 	default:
 		return a.pluginItems
 	}
@@ -403,6 +412,10 @@ func (a *app) switchSource(i int) {
 		a.webdavEntries = nil
 		a.webdavVideos = nil
 		a.webdavErr = ""
+		a.webdavAll = false
+		a.webdavAllItems = nil
+		a.webdavScanning = false
+		atomic.AddInt32(&a.webdavGen, 1)
 	}
 	a.route = pageHome
 	a.invalidate()

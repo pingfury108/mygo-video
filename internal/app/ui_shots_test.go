@@ -273,3 +273,37 @@ func TestWebDAVShots(t *testing.T) {
 	a.route = pageDetail
 	shoot("15-webdav-detail.png")
 }
+
+// TestWebDAVAllShot renders the grid of every video found below.
+func TestWebDAVAllShot(t *testing.T) {
+	dir := os.Getenv("SHOTS")
+	if dir == "" {
+		t.Skip("SHOTS is not set")
+	}
+	a := shotApp(t)
+	c, err := webdav.New(webdav.Config{URL: "http://127.0.0.1:1/dav"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.webdav = c
+	a.source = sourceWebDAV
+	a.webdavHasLoaded = true
+	a.webdavAll = true
+	a.webdavAllItems = a.webdavItemsFrom([]webdav.Entry{
+		{Path: "Movies/Heat (1995).mkv", Name: "Heat (1995).mkv", Size: 8_000_000_000},
+		{Path: "Movies/Dune.mkv", Name: "Dune.mkv", Size: 6_000_000_000},
+		{Path: "Shows/Fog Harbour S02E05.mp4", Name: "Fog Harbour S02E05.mp4", Size: 1_200_000_000},
+	})
+	a.route = pageHome
+	tt := ui.NewTester(a.view, 1180, 780)
+	tt.Frame()
+	tt.Frame()
+	f, err := os.Create(filepath.Join(dir, "16-webdav-all.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, tt.Image()); err != nil {
+		t.Fatal(err)
+	}
+}

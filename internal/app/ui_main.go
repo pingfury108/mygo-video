@@ -209,7 +209,7 @@ func (a *app) sourceSwitcher(c *ui.Context) {
 		}
 		sources := []choice{
 			{name: "本地视频", count: a.lib.Count()},
-			{name: "WebDAV", index: sourceWebDAV, count: len(a.webdavVideos)},
+			{name: "WebDAV", index: sourceWebDAV, count: len(a.webdavItems())},
 		}
 		for i, pl := range a.plugins {
 			n := 0
@@ -310,7 +310,7 @@ func (a *app) sourceLine() string {
 		if a.webdavBusy {
 			return "WebDAV · 正在载入…"
 		}
-		return fmt.Sprintf("WebDAV · %d 个", len(a.webdavVideos))
+		return fmt.Sprintf("WebDAV · %d 个", len(a.webdavItems()))
 	case sourceLocal:
 		if a.lib == nil {
 			return "本地视频"

@@ -9,6 +9,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -63,6 +64,7 @@ func (a *app) saveWebDAV() {
 
 // openWebDAVPath shows a folder of the server.
 func (a *app) openWebDAVPath(p string) {
+	a.webdavAll = false
 	a.webdavPath = p
 	a.webdavLoaded = ""
 	a.webdavHasLoaded = false
@@ -183,6 +185,10 @@ func (a *app) webdavHome(c *ui.Context) {
 		})
 		return
 	}
+	if a.webdavAll {
+		a.webdavAllView(c)
+		return
+	}
 	a.loadWebDAV()
 	if a.webdavErr != "" {
 		ui.Column(c).Grow(1).Children(func() {
@@ -220,6 +226,7 @@ func (a *app) webdavHome(c *ui.Context) {
 				}
 				ui.Text(c, name).FontSize(12).TextColor(p.muted).SingleLine()
 				ui.Box(c).Grow(1)
+				ghostButton(c, "全部视频", iconSearch, a.scanWebDAVAll)
 				iconButton(c, iconRefresh, 15, "刷新", func() {
 					a.openWebDAVPath(a.webdavPath)
 				})
@@ -270,4 +277,128 @@ func parentPath(p string) string {
 		return p[:i]
 	}
 	return ""
+}
+
+func (a *app) webdavAuth() map[string]string {
+	cfg := a.store.WebDAV()
+	if cfg.User == "" && cfg.Pass == "" {
+		return nil
+	}
+	return map[string]string{
+		"Authorization": "Basic " + base64.StdEncoding.EncodeToString([]byte(cfg.User+":"+cfg.Pass)),
+	}
+}
+
+func (a *app) webdavItems() []media.Item {
+	if a.webdavAll {
+		return a.webdavAllItems
+	}
+	return a.webdavVideos
+}
+
+// webdavAllView is every video below the folder showing, as a grid.
+func (a *app) webdavAllView(c *ui.Context) {
+	p := colors()
+	ui.Row(c).Height(48).PaddingX(32).AlignItems(ui.Center).Gap(10).Children(func() {
+		ui.Text(c, "全部视频").FontSize(14).FontWeight(600)
+		if a.webdavScanning {
+			ui.Text(c, fmt.Sprintf("已扫 %d 个文件夹 · %d 个视频", a.webdavScanned, a.webdavFound)).
+				FontSize(11).TextColor(p.faint)
+			ghostButton(c, "取消", nil, a.cancelWebDAVScan)
+		} else {
+			ui.Text(c, fmt.Sprintf("%d 个", len(a.webdavAllItems))).FontSize(11).TextColor(p.faint)
+			ghostButton(c, "重新扫描", iconRefresh, a.scanWebDAVAll)
+		}
+		ui.Box(c).Grow(1)
+		ghostButton(c, "返回文件夹", iconBack, func() {
+			a.webdavAll = false
+			a.invalidate()
+		})
+	})
+	if len(a.webdavAllItems) == 0 {
+		if a.webdavScanning {
+			emptyState(c, "正在扫描…", "大目录可能要一会儿，可以取消。", nil)
+		} else {
+			emptyState(c, "没有找到视频", "换一个文件夹再扫，或检查服务器上的文件。", nil)
+		}
+		return
+	}
+	ui.GridView(c, nil, len(a.webdavAllItems), 190, 176, func(i int) {
+		a.videoCard(c, a.webdavAllItems[i], 0)
+	}).Grow(1).Padding(8, 32, 36, 32)
+}
+
+// scanWebDAVAll lists every folder below the one showing, keeping the
+// videos. It runs off the main thread and can be cancelled.
+func (a *app) scanWebDAVAll() {
+	if a.webdav == nil || a.webdavScanning {
+		return
+	}
+	a.webdavScanning = true
+	a.webdavAll = true
+	a.webdavAllItems = nil
+	a.webdavScanned = 0
+	a.webdavFound = 0
+	gen := atomic.AddInt32(&a.webdavGen, 1)
+	a.invalidate()
+	go func() {
+		type node struct {
+			path  string
+			depth int
+		}
+		queue := []node{{path: "", depth: 0}}
+		seen := map[string]bool{"": true}
+		var items []media.Item
+		dirs := 0
+		for len(queue) > 0 {
+			if atomic.LoadInt32(&a.webdavGen) != gen {
+				return
+			}
+			n := queue[0]
+			queue = queue[1:]
+			entries, err := a.webdav.List(context.Background(), n.path)
+			if err != nil {
+				continue
+			}
+			dirs++
+			for _, e := range entries {
+				if e.Dir && n.depth < 8 && !seen[e.Path] {
+					seen[e.Path] = true
+					queue = append(queue, node{path: e.Path, depth: n.depth + 1})
+				}
+			}
+			items = append(items, a.webdavItemsFrom(entries)...)
+			if dirs >= 2000 || len(items) >= 20000 {
+				break
+			}
+			if dirs%5 == 0 {
+				d, found := dirs, len(items)
+				mygo.RunOnMain(func() {
+					if atomic.LoadInt32(&a.webdavGen) != gen {
+						return
+					}
+					a.webdavScanned, a.webdavFound = d, found
+					a.invalidate()
+				})
+			}
+		}
+		mygo.RunOnMain(func() {
+			if atomic.LoadInt32(&a.webdavGen) != gen {
+				return
+			}
+			sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+			a.webdavScanning = false
+			a.webdavScanned = dirs
+			a.webdavAllItems = items
+			a.webdavFound = len(items)
+			a.invalidate()
+		})
+	}()
+}
+
+func (a *app) cancelWebDAVScan() {
+	atomic.AddInt32(&a.webdavGen, 1)
+	a.webdavScanning = false
+	a.webdavAll = false
+	a.invalidate()
 }

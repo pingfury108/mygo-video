@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -22,7 +23,7 @@ const thumbKeep = 120
 // when this machine has no ffmpeg to take one. Cards fall back to the
 // placeholder their name gives them.
 func (a *app) thumbnail(it media.Item) *ui.Bitmap {
-	if it.Path == "" {
+	if it.Path == "" && it.Source != "webdav" {
 		return nil
 	}
 	if b, ok := a.thumbs[it.ID]; ok {
@@ -37,10 +38,20 @@ func (a *app) thumbnail(it media.Item) *ui.Bitmap {
 }
 
 func (a *app) loadThumb(it media.Item) {
-	path := thumb.Path(a.thumbDir, it.ID)
-	if st, err := os.Stat(path); err != nil || st.ModTime().Before(it.ModTime) {
-		if err := thumb.Make(context.Background(), a.thumbTool, it.Path, path); err != nil {
-			log.Printf("thumb %s: %v", it.Name, err)
+	key := thumbKey(it)
+	path := thumb.Path(a.thumbDir, key)
+	switch {
+	case it.Source == "webdav":
+		if _, err := os.Stat(path); err != nil {
+			if err := thumb.MakeURL(context.Background(), a.thumbTool, it.RemoteID, a.webdavAuth(), path); err != nil {
+				log.Printf("thumb %s: %v", it.Name, err)
+			}
+		}
+	default:
+		if st, err := os.Stat(path); err != nil || st.ModTime().Before(it.ModTime) {
+			if err := thumb.Make(context.Background(), a.thumbTool, it.Path, path); err != nil {
+				log.Printf("thumb %s: %v", it.Name, err)
+			}
 		}
 	}
 	data, err := os.ReadFile(path)
@@ -104,4 +115,13 @@ func (a *app) pregenerateThumbs(items []media.Item) {
 		}(it, path)
 	}
 	mygo.RunOnMain(a.invalidate)
+}
+
+// thumbKey is an item's thumbnail file name: a WebDAV one has no colon in
+// its ID where a file name goes.
+func thumbKey(it media.Item) string {
+	if it.Source == "webdav" {
+		return strings.TrimPrefix(it.ID, "webdav:")
+	}
+	return it.ID
 }

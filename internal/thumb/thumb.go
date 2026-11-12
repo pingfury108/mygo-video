@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -55,6 +56,7 @@ func run(ctx context.Context, ffmpeg, at, video, path string) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, ffmpeg,
 		"-y", "-loglevel", "error",
+		"-rw_timeout", "15000000",
 		"-ss", at,
 		"-i", video,
 		"-frames:v", "1",
@@ -62,6 +64,59 @@ func run(ctx context.Context, ffmpeg, at, video, path string) error {
 		"-q:v", "4",
 		path,
 	)
+	if err := cmd.Run(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	if st, err := os.Stat(path); err != nil || st.Size() == 0 {
+		_ = os.Remove(path)
+		return errors.New("thumb: no frame")
+	}
+	return nil
+}
+
+// MakeURL takes a frame of a video at a URL, with the headers its server
+// asks for, as a WebDAV one behind basic authentication does.
+func MakeURL(ctx context.Context, ffmpeg, raw string, headers map[string]string, path string) error {
+	if ffmpeg == "" {
+		return errors.New("thumb: no ffmpeg")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	var last error
+	for _, at := range []string{"10", "1"} {
+		last = runURL(ctx, ffmpeg, at, raw, headers, path)
+		if last == nil {
+			return nil
+		}
+	}
+	return last
+}
+
+func runURL(ctx context.Context, ffmpeg, at, raw string, headers map[string]string, path string) error {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	args := []string{"-y", "-loglevel", "error", "-rw_timeout", "15000000"}
+	if len(headers) > 0 {
+		var b strings.Builder
+		for k, v := range headers {
+			b.WriteString(k)
+			b.WriteString(": ")
+			b.WriteString(v)
+			b.WriteString("\r\n")
+		}
+		args = append(args, "-headers", b.String())
+	}
+	args = append(args,
+		"-ss", at,
+		"-i", raw,
+		"-frames:v", "1",
+		"-vf", "scale=640:-2",
+		"-q:v", "4",
+		path,
+	)
+	cmd := exec.CommandContext(ctx, ffmpeg, args...)
 	if err := cmd.Run(); err != nil {
 		_ = os.Remove(path)
 		return err
