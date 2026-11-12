@@ -18,11 +18,13 @@ export async function home() {
           {
             id: "bipbop",
             name: "BipBop",
+            poster: "https://picsum.photos/seed/bipbop/640/360",
             overview: "Apple 的公开 HLS 测试流，用来验证代理、HLS 重写和播放。",
           },
           {
             id: "bipbop-2",
             name: "BipBop（第二个）",
+            poster: "https://picsum.photos/seed/bipbop2/640/360",
             overview: "同一个流，用来验证卡片与详情页。",
           },
         ],
