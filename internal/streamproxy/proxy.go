@@ -1,0 +1,529 @@
+// Package streamproxy serves a stream to the system's media framework the
+// way its source expects it: with the headers it needs, over a loopback
+// address of this app's own, and with HLS playlists rewritten so that their
+// parts come back through it too. Segments encrypted with AES-128 are
+// decrypted in memory, so the player sees plain MPEG-TS or fMP4.
+//
+// MyGo's video players, as the system frameworks under them, take a URL and
+// no headers; a source, which may keep its streams behind a Referer, a
+// Cookie or a signed query, therefore cannot hand one over as it is.
+package streamproxy
+
+import (
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Stream is what a source hands over to play.
+type Stream struct {
+	// URL is the stream's own address: an HLS playlist, or a file.
+	URL string
+	// Type is "hls" or "mp4". Empty asks for HLS when the URL ends in
+	// .m3u8, and a file otherwise.
+	Type string
+	// Headers go with every request to the source: Referer, User-Agent,
+	// Cookie, Origin, and the like.
+	Headers map[string]string
+}
+
+// Proxy hands streams to the player over loopback.
+type Proxy struct {
+	ln     net.Listener
+	srv    *http.Server
+	base   string
+	client *http.Client
+
+	mu      sync.Mutex
+	streams map[string]*Stream
+	keys    map[string][]byte
+}
+
+// New starts a proxy on a loopback port of its own.
+func New() (*Proxy, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	p := &Proxy{
+		ln:      ln,
+		base:    "http://" + ln.Addr().String(),
+		client:  &http.Client{Transport: &http.Transport{DisableCompression: true}},
+		streams: map[string]*Stream{},
+		keys:    map[string][]byte{},
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/s/", p.serve)
+	p.srv = &http.Server{Handler: mux}
+	go p.srv.Serve(ln)
+	return p, nil
+}
+
+// Base is the loopback address streams are served on.
+func (p *Proxy) Base() string { return p.base }
+
+// Close stops the proxy and every stream it serves.
+func (p *Proxy) Close() error {
+	return p.srv.Close()
+}
+
+// Open starts serving s and answers the URL to play: its playlist for HLS,
+// or the file itself.
+func (p *Proxy) Open(s Stream) (string, error) {
+	if s.URL == "" {
+		return "", errors.New("streamproxy: no URL")
+	}
+	if s.Type == "" {
+		s.Type = "mp4"
+		if strings.Contains(strings.ToLower(s.URL), ".m3u8") {
+			s.Type = "hls"
+		}
+	}
+	token, err := newToken()
+	if err != nil {
+		return "", err
+	}
+	p.mu.Lock()
+	p.streams[token] = &s
+	p.mu.Unlock()
+
+	kind := "b"
+	if s.Type == "hls" {
+		kind = "p"
+	}
+	return p.base + "/s/" + token + "/" + kind + "/" + encode(s.URL), nil
+}
+
+// Forget stops serving a stream.
+func (p *Proxy) Forget(token string) {
+	p.mu.Lock()
+	delete(p.streams, token)
+	p.mu.Unlock()
+}
+
+func (p *Proxy) stream(token string) *Stream {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.streams[token]
+}
+
+func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
+	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/s/"), "/", 3)
+	if len(parts) != 3 {
+		http.NotFound(w, r)
+		return
+	}
+	token, kind, enc := parts[0], parts[1], parts[2]
+	s := p.stream(token)
+	if s == nil {
+		http.NotFound(w, r)
+		return
+	}
+	raw, err := decode(enc)
+	if err != nil {
+		http.Error(w, "bad stream address", http.StatusBadRequest)
+		return
+	}
+	switch kind {
+	case "p":
+		p.servePlaylist(w, r, s, raw, token)
+	case "b":
+		p.serveBytes(w, r, s, raw)
+	case "k":
+		p.serveKey(w, r, s, raw)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (p *Proxy) servePlaylist(w http.ResponseWriter, r *http.Request, s *Stream, raw, token string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	resp, err := p.fetch(ctx, s, raw, "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, resp.Status, resp.StatusCode)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	// A master playlist, or a media one: both are rewritten. Anything else
+	// a source calls a playlist is passed through as it is.
+	if !strings.Contains(string(body), "#EXTM3U") {
+		copyHeader(w, resp, "Content-Type")
+		w.Write(body)
+		return
+	}
+	base := resp.Request.URL
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Write(p.rewrite(body, base, token))
+}
+
+func (p *Proxy) serveBytes(w http.ResponseWriter, r *http.Request, s *Stream, raw string) {
+	key := r.URL.Query().Get("k")
+	iv := r.URL.Query().Get("iv")
+	seq, _ := strconv.ParseUint(r.URL.Query().Get("seq"), 10, 64)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	rng := r.Header.Get("Range")
+	// A decrypted segment is served whole: its length is only known once it
+	// came, and the player may ask for a part of the plain one.
+	if key != "" {
+		rng = ""
+	}
+	resp, err := p.fetch(ctx, s, raw, rng)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		http.Error(w, resp.Status, resp.StatusCode)
+		return
+	}
+
+	if key != "" {
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		plain, err := p.decrypt(ctx, s, key, parseIV(iv, seq), data)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		copyHeader(w, resp, "Content-Type")
+		w.Header().Set("Content-Length", strconv.Itoa(len(plain)))
+		w.WriteHeader(http.StatusOK)
+		w.Write(plain)
+		return
+	}
+
+	copyHeader(w, resp, "Content-Type")
+	copyHeader(w, resp, "Content-Length")
+	copyHeader(w, resp, "Content-Range")
+	copyHeader(w, resp, "Accept-Ranges")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (p *Proxy) serveKey(w http.ResponseWriter, r *http.Request, s *Stream, raw string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	key, err := p.key(ctx, s, raw)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Write(key)
+}
+
+func (p *Proxy) fetch(ctx context.Context, s *Stream, raw, rng string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range s.Headers {
+		req.Header.Set(k, v)
+	}
+	if rng != "" {
+		req.Header.Set("Range", rng)
+	}
+	return p.client.Do(req)
+}
+
+func (p *Proxy) key(ctx context.Context, s *Stream, raw string) ([]byte, error) {
+	p.mu.Lock()
+	key, ok := p.keys[raw]
+	p.mu.Unlock()
+	if ok {
+		return key, nil
+	}
+	resp, err := p.fetch(ctx, s, raw, "")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("streamproxy: key: %s", resp.Status)
+	}
+	key, err = io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return nil, err
+	}
+	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
+		return nil, errors.New("streamproxy: key is not 16, 24 or 32 bytes")
+	}
+	p.mu.Lock()
+	p.keys[raw] = key
+	p.mu.Unlock()
+	return key, nil
+}
+
+func (p *Proxy) decrypt(ctx context.Context, s *Stream, keyURL string, iv []byte, data []byte) ([]byte, error) {
+	key, err := p.key(ctx, s, keyURL)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || len(data)%aes.BlockSize != 0 {
+		return nil, errors.New("streamproxy: segment is not a whole number of blocks")
+	}
+	plain := make([]byte, len(data))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(plain, data)
+	// PKCS#7 padding, which HLS uses.
+	if n := int(plain[len(plain)-1]); n > 0 && n <= aes.BlockSize && n <= len(plain) {
+		for _, b := range plain[len(plain)-n:] {
+			if int(b) != n {
+				return plain, nil
+			}
+		}
+		plain = plain[:len(plain)-n]
+	}
+	return plain, nil
+}
+
+// rewrite turns a playlist's addresses into the proxy's own, keeping the
+// key each segment is encrypted with.
+func (p *Proxy) rewrite(body []byte, base *url.URL, token string) []byte {
+	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	var keyURL string
+	var keyIV string
+	var seq uint64
+	variant := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "#EXT-X-MEDIA-SEQUENCE:"):
+			seq, _ = strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(trimmed, "#EXT-X-MEDIA-SEQUENCE:")), 10, 64)
+			out = append(out, line)
+		case strings.HasPrefix(trimmed, "#EXT-X-KEY:"):
+			attrs := parseAttrs(trimmed)
+			method := strings.ToUpper(attrs["METHOD"])
+			if method == "AES-128" && attrs["URI"] != "" {
+				keyURL = resolve(base, attrs["URI"]).String()
+				keyIV = attrs["IV"]
+				attrs["URI"] = p.base + "/s/" + token + "/k/" + encode(keyURL)
+				out = append(out, rebuildTag("EXT-X-KEY", attrs))
+			} else {
+				keyURL, keyIV = "", ""
+				out = append(out, line)
+			}
+		case strings.HasPrefix(trimmed, "#EXT-X-MAP:"):
+			out = append(out, p.rewriteTagURI(trimmed, base, token, "b", keyURL, keyIV, 0))
+		case strings.HasPrefix(trimmed, "#EXT-X-MEDIA:"),
+			strings.HasPrefix(trimmed, "#EXT-X-I-FRAME-STREAM-INF:"):
+			out = append(out, p.rewriteTagURI(trimmed, base, token, "p", "", "", 0))
+		case strings.HasPrefix(trimmed, "#EXT-X-STREAM-INF"):
+			out = append(out, line)
+			variant = true
+		case trimmed == "" || strings.HasPrefix(trimmed, "#"):
+			out = append(out, line)
+		default:
+			u := resolve(base, trimmed)
+			if variant {
+				out = append(out, p.playlistURL(token, u))
+				variant = false
+			} else {
+				out = append(out, p.segmentURL(token, u, keyURL, keyIV, seq))
+				seq++
+			}
+		}
+	}
+	return []byte(strings.Join(out, "\n"))
+}
+
+func (p *Proxy) playlistURL(token string, u *url.URL) string {
+	return p.base + "/s/" + token + "/p/" + encode(u.String())
+}
+
+func (p *Proxy) segmentURL(token string, u *url.URL, keyURL, keyIV string, seq uint64) string {
+	q := url.Values{}
+	if keyURL != "" {
+		q.Set("k", keyURL)
+		if keyIV != "" {
+			q.Set("iv", keyIV)
+		}
+		q.Set("seq", strconv.FormatUint(seq, 10))
+	}
+	out := p.base + "/s/" + token + "/b/" + encode(u.String())
+	if len(q) > 0 {
+		out += "?" + q.Encode()
+	}
+	return out
+}
+
+// rewriteTagURI rewrites the URI attribute of a tag, as EXT-X-MAP or
+// EXT-X-MEDIA has it.
+func (p *Proxy) rewriteTagURI(line string, base *url.URL, token, kind, keyURL, keyIV string, seq uint64) string {
+	name, attrs := nameAndAttrs(line)
+	uri := attrs["URI"]
+	if uri == "" {
+		return line
+	}
+	u := resolve(base, uri)
+	if kind == "p" {
+		attrs["URI"] = p.playlistURL(token, u)
+	} else {
+		attrs["URI"] = p.segmentURL(token, u, keyURL, keyIV, seq)
+	}
+	return rebuildTag(name, attrs)
+}
+
+func resolve(base *url.URL, ref string) *url.URL {
+	u, err := url.Parse(ref)
+	if err != nil {
+		return base
+	}
+	return base.ResolveReference(u)
+}
+
+func parseIV(s string, seq uint64) []byte {
+	s = strings.TrimSpace(s)
+	if s != "" {
+		if b, err := hex.DecodeString(strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")); err == nil && len(b) == aes.BlockSize {
+			return b
+		}
+	}
+	iv := make([]byte, aes.BlockSize)
+	binary.BigEndian.PutUint64(iv[8:], seq)
+	return iv
+}
+
+// parseAttrs reads a tag's attributes: METHOD=AES-128,URI="key.bin".
+func parseAttrs(line string) map[string]string {
+	_, attrs := nameAndAttrs(line)
+	return attrs
+}
+
+// nameAndAttrs splits a tag at its colon, then its attributes, keeping the
+// ones a value's comma does not end.
+func nameAndAttrs(line string) (string, map[string]string) {
+	name := strings.TrimPrefix(strings.TrimSpace(line), "#")
+	rest := ""
+	if i := strings.IndexByte(name, ':'); i >= 0 {
+		name, rest = name[:i], name[i+1:]
+	}
+	attrs := map[string]string{}
+	for len(rest) > 0 {
+		rest = strings.TrimLeft(rest, " \t,")
+		if rest == "" {
+			break
+		}
+		eq := strings.IndexByte(rest, '=')
+		if eq < 0 {
+			break
+		}
+		k := strings.TrimSpace(rest[:eq])
+		rest = rest[eq+1:]
+		var v string
+		if strings.HasPrefix(rest, `"`) {
+			if end := strings.IndexByte(rest[1:], '"'); end >= 0 {
+				v = rest[1 : 1+end]
+				rest = rest[2+end:]
+			} else {
+				v = rest[1:]
+				rest = ""
+			}
+		} else {
+			if comma := strings.IndexByte(rest, ','); comma >= 0 {
+				v = rest[:comma]
+				rest = rest[comma+1:]
+			} else {
+				v = rest
+				rest = ""
+			}
+		}
+		attrs[k] = v
+	}
+	return name, attrs
+}
+
+func rebuildTag(name string, attrs map[string]string) string {
+	// The order of a map is not stable, and a playlist reader does not care;
+	// URI goes first as it reads best.
+	var b strings.Builder
+	b.WriteString("#")
+	b.WriteString(name)
+	b.WriteString(":")
+	if uri, ok := attrs["URI"]; ok {
+		fmt.Fprintf(&b, `URI="%s"`, uri)
+		delete(attrs, "URI")
+		for k, v := range attrs {
+			fmt.Fprintf(&b, `,%s=%s`, k, quoteAttr(v))
+		}
+	} else {
+		first := true
+		for k, v := range attrs {
+			if !first {
+				b.WriteString(",")
+			}
+			first = false
+			fmt.Fprintf(&b, `%s=%s`, k, quoteAttr(v))
+		}
+	}
+	return b.String()
+}
+
+func quoteAttr(v string) string {
+	if v == "" {
+		return `""`
+	}
+	if strings.ContainsAny(v, `, "`) {
+		return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"`
+	}
+	return v
+}
+
+func copyHeader(w http.ResponseWriter, resp *http.Response, name string) {
+	if v := resp.Header.Get(name); v != "" {
+		w.Header().Set(name, v)
+	}
+}
+
+func newToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func encode(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
+
+func decode(s string) (string, error) {
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}

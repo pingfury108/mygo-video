@@ -59,10 +59,13 @@ go tool mygo build    # 打包到 build/
 ```
 main.go
 internal/
-  app/       视图与状态：侧栏、首页、详情、播放、搜索、设置
-  local/     本地库：扫描、文件名解析
-  media/     领域模型：视频、进度、时长格式化
-  store/     进度、音量、扫描目录（JSON）
+  app/          视图与状态：侧栏、首页、详情、播放、搜索、设置
+  local/        本地库：扫描、文件名解析
+  media/        领域模型：视频、进度、时长格式化
+  store/        进度、音量、扫描目录（JSON）
+  subtitle/     SRT / VTT 解析
+  thumb/        ffmpeg 抽帧，缩略图缓存
+  streamproxy/  本机代理：请求头注入、HLS 重写、AES-128 解密
 docs/
   PLAN.md        学习笔记、架构、插件协议、里程碑
   PLUGIN-API.md  插件协议草案
