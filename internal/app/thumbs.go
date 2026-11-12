@@ -22,6 +22,9 @@ const thumbKeep = 120
 // when this machine has no ffmpeg to take one. Cards fall back to the
 // placeholder their name gives them.
 func (a *app) thumbnail(it media.Item) *ui.Bitmap {
+	if it.Path == "" {
+		return nil
+	}
 	if b, ok := a.thumbs[it.ID]; ok {
 		a.thumbUsed[it.ID] = time.Now()
 		return b

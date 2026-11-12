@@ -41,6 +41,7 @@ go tool mygo build    # 打包到 build/
 ## 现在能做什么
 
 - 本地视频库：扫描文件夹，按修改时间排序，识别 `S02E05` 这样的集数
+- 插件源：数据目录 `plugins/` 下的 JS/TS 插件，接入后出现在侧栏底部的源列表里；播放走本机代理
 - 封面：用本机 `ffmpeg` 从视频 10 秒处抽帧，640×360 JPEG 缓存在数据目录；列表、详情海报、首页 hero 都用它，没有 ffmpeg 时回退到首字色块
 - 首页：继续观看（全宽 hero）、最近添加
 - 片库：网格
@@ -54,6 +55,32 @@ go tool mygo build    # 打包到 build/
 
 格式支持取决于系统：MP4 / MOV（H.264 + AAC）在各平台都能播；MKV、WebM、AVI、HEVC 看系统有没有对应解码器。Linux 需要 GStreamer 1.x 及 base 插件。字幕只读外挂文件，不读内嵌字幕轨。
 
+## 插件
+
+插件是一个文件夹，放在应用数据目录下的 `plugins/<id>/`，里面是 `plugin.json` 和一个 JS/TS 模块：
+
+```
+~/Library/Application Support/MyGo Video Dev/plugins/demo/
+  plugin.json
+  index.js
+```
+
+`plugin.json` 声明 `id`、`name`、`apiVersion`、`main`、`playback` 和权限。模块导出函数，名字就是能力：
+
+| 导出 | 参数 | 返回 |
+| --- | --- | --- |
+| `home` | | `{title, sections: [{title, videos: [...]}]}` |
+| `browse` | `{page}` | 同上 |
+| `search` | `{query, offset}` | `{videos, more}` |
+| `title` | `{id}` | `{video, episodes}` |
+| `play` | `{id}` | `{url, type, headers, open, duration, drm}` |
+| `progress` | `{id, position, duration, done}` | |
+| `signIn` / `signOut` / `account` | | 账号 |
+
+`permissions.network` 同时限制 `fetch` 和本机代理能访问的 host。`play` 返回 `open` 时在浏览器打开；返回 `drm` 时应用明确拒绝播放。
+
+复制 `examples/demo-plugin` 到数据目录的 `plugins/`，重启后侧栏底部就能切到「演示源」，播放 Apple 的公开 HLS 测试流。
+
 ## 结构
 
 ```
@@ -62,10 +89,13 @@ internal/
   app/          视图与状态：侧栏、首页、详情、播放、搜索、设置
   local/        本地库：扫描、文件名解析
   media/        领域模型：视频、进度、时长格式化
+  plugin/       JS/TS 插件宿主：manifest、moejs、host API
   store/        进度、音量、扫描目录（JSON）
   subtitle/     SRT / VTT 解析
   thumb/        ffmpeg 抽帧，缩略图缓存
   streamproxy/  本机代理：请求头注入、HLS 重写、AES-128 解密
+examples/
+  demo-plugin/  一个公开 HLS 测试流的插件
 docs/
   PLAN.md        学习笔记、架构、插件协议、里程碑
   PLUGIN-API.md  插件协议草案
@@ -86,7 +116,7 @@ python3 -m http.server 4311 --directory designs
 
 ## 已知限制
 
-- 还没有插件，所以只有本地来源
+- 插件是首版：没有安装界面（手动放进数据目录）、没有账号界面、没有插件设置界面
 - 封面只是正片里的一帧，不是刮削来的海报；没有 `ffmpeg` 时回退到首字色块
 - 字幕只读外挂的 `.srt` / `.vtt`，不读内嵌字幕轨，也不支持 ASS 样式
 - 没有弹幕（等插件来源）

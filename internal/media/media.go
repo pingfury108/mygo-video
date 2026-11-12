@@ -22,6 +22,15 @@ type Item struct {
 	Series  string `json:"series,omitempty"`
 	Season  int    `json:"season,omitempty"`
 	Episode int    `json:"episode,omitempty"`
+
+	// A video a plugin lists has no file of its own: Source is the plugin's
+	// id, RemoteID its id there, and Poster and Overview what it says of it.
+	Source   string `json:"source,omitempty"`
+	RemoteID string `json:"remoteId,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Poster   string `json:"poster,omitempty"`
+	Overview string `json:"overview,omitempty"`
+	Duration int64  `json:"duration,omitempty"` // milliseconds
 }
 
 // EpisodeLabel is "S02E05", or "" for a film.
@@ -34,6 +43,22 @@ func (it Item) EpisodeLabel() string {
 
 // Subtitle is what a row shows under the name.
 func (it Item) Subtitle() string {
+	if it.Source != "" {
+		var parts []string
+		if it.Series != "" {
+			parts = append(parts, it.Series)
+		}
+		if label := it.EpisodeLabel(); label != "" {
+			parts = append(parts, label)
+		}
+		if it.Duration > 0 {
+			parts = append(parts, HumanDuration(it.Duration))
+		}
+		if len(parts) == 0 {
+			return "视频"
+		}
+		return strings.Join(parts, " · ")
+	}
 	parts := []string{}
 	if it.Series != "" {
 		parts = append(parts, it.Series)
@@ -97,4 +122,86 @@ func HumanDuration(ms int64) string {
 		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
 	}
 	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+// A Video is a title a plugin lists: a film, an episode, a clip.
+type Video struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Series   string `json:"series,omitempty"`
+	Season   int    `json:"season,omitempty"`
+	Episode  int    `json:"episode,omitempty"`
+	Duration int64  `json:"duration,omitempty"` // milliseconds
+	Poster   string `json:"poster,omitempty"`
+	Backdrop string `json:"backdrop,omitempty"`
+	Overview string `json:"overview,omitempty"`
+	// URL is the video's own page at its source, for sharing or for a
+	// source that plays there instead of here.
+	URL string `json:"url,omitempty"`
+}
+
+// Section is a row of a plugin's page.
+type Section struct {
+	Title  string  `json:"title,omitempty"`
+	Videos []Video `json:"videos,omitempty"`
+}
+
+// Browse is a page a plugin makes up itself: its Home, or one opened from
+// its sidebar.
+type Browse struct {
+	Title    string    `json:"title,omitempty"`
+	Subtitle string    `json:"subtitle,omitempty"`
+	Sections []Section `json:"sections,omitempty"`
+}
+
+// SearchResult is what a plugin's search found.
+type SearchResult struct {
+	Videos []Video `json:"videos,omitempty"`
+	More   bool    `json:"more,omitempty"`
+}
+
+// TitlePage is a title and its episodes, for a series.
+type TitlePage struct {
+	Video    Video   `json:"video"`
+	Episodes []Video `json:"episodes,omitempty"`
+}
+
+// Playback is what a plugin answers to play a video.
+type Playback struct {
+	URL     string            `json:"url,omitempty"`
+	Type    string            `json:"type,omitempty"` // hls, mp4
+	Headers map[string]string `json:"headers,omitempty"`
+	// Open is where to play it instead, for a source that only knows where
+	// its own player is: the app opens it in the listener's browser.
+	Open     string `json:"open,omitempty"`
+	Duration int64  `json:"duration,omitempty"` // milliseconds
+	Live     bool   `json:"live,omitempty"`
+	// DRM says the stream is protected, as "widevine", which the app can't
+	// play and doesn't try to bypass.
+	DRM string `json:"drm,omitempty"`
+}
+
+// A Setting is something a plugin asks the listener for.
+type Setting struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Help  string `json:"help,omitempty"`
+	Link  string `json:"link,omitempty"`
+}
+
+// A NavItem is an entry of a plugin's sidebar.
+type NavItem struct {
+	Title   string `json:"title"`
+	Page    string `json:"page,omitempty"`
+	Builtin string `json:"builtin,omitempty"`
+}
+
+// Info is how a plugin introduces itself.
+type Info struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Version    string    `json:"version,omitempty"`
+	Playback   string    `json:"playback,omitempty"` // stream or catalog
+	Settings   []Setting `json:"settings,omitempty"`
+	Navigation []NavItem `json:"navigation,omitempty"`
 }

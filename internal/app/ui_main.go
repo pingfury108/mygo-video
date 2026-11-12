@@ -169,10 +169,11 @@ func (a *app) stepButton(c *ui.Context, icon *ui.SVG, label string, enabled bool
 // arrive.
 func (a *app) sourceSwitcher(c *ui.Context) {
 	p := colors()
-	name := "本地视频"
-	if a.lib.Scanning() {
+	name := a.sourceName()
+	if a.source == 0 && a.lib.Scanning() {
 		name = "正在扫描…"
 	}
+	count := len(a.items())
 	anchor := ui.ButtonBase(c).Height(32).PaddingX(9).Gap(10).Radius(7).
 		AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label("当前源")
 	switch {
@@ -190,28 +191,50 @@ func (a *app) sourceSwitcher(c *ui.Context) {
 		ui.Icon(c, iconFilm).Size(16, 16).TextColor(p.faint)
 		ui.Text(c, name).FontSize(13).FontWeight(500).SingleLine().Shrink(1)
 		ui.Box(c).Grow(1)
-		ui.Text(c, fmt.Sprintf("%d 个", a.lib.Count())).
+		ui.Text(c, fmt.Sprintf("%d 个", count)).
 			FontSize(11).TextColor(p.faint)
 		ui.Icon(c, iconDown).Size(12, 12).TextColor(p.faint)
 	})
 
 	ui.PopoverBase(c, anchor, &a.sourceMenu, func(panel ui.Element) {
-		panel.MinWidth(210).Margin(6, 0, 6, 0).Padding(6).Gap(2).Radius(10).
+		panel.MinWidth(220).Margin(6, 0, 6, 0).Padding(6).Gap(2).Radius(10).
 			Background(p.panel).Border(1, p.hairline).
 			Shadow(0, 10, 28, 2, p.cardShade)
 
-		current := ui.ButtonBase(c).Height(30).PaddingX(8).Gap(8).Radius(7).
-			AlignItems(ui.Center).Justify(ui.Start)
-		if current.Hovered() {
-			current.Background(p.hover)
+		type choice struct {
+			name  string
+			index int
+			count int
 		}
-		current.Children(func() {
-			ui.Icon(c, iconCheck).Size(13, 13).TextColor(p.accent)
-			ui.Text(c, "本地视频").FontSize(12.5).TextColor(p.text)
-			ui.Box(c).Grow(1)
-			ui.Text(c, fmt.Sprintf("%d 个", a.lib.Count())).
-				FontSize(10.5).TextColor(p.faint)
-		})
+		sources := []choice{{name: "本地视频", count: a.lib.Count()}}
+		for i, pl := range a.plugins {
+			n := 0
+			if a.source == i+1 {
+				n = len(a.pluginItems)
+			}
+			sources = append(sources, choice{name: pl.Info().Name, index: i + 1, count: n})
+		}
+		for _, src := range sources {
+			index := src.index
+			item := ui.ButtonBase(c).Height(30).PaddingX(8).Gap(8).Radius(7).
+				AlignItems(ui.Center).Justify(ui.Start)
+			if item.Hovered() {
+				item.Background(p.hover)
+			}
+			item.OnClick(func() { a.switchSource(index) })
+			item.Children(func() {
+				check := ui.Icon(c, iconCheck).Size(13, 13).TextColor(p.accent)
+				if a.source != index {
+					check.Opacity(0)
+				}
+				ui.Text(c, src.name).FontSize(12.5).TextColor(p.text).SingleLine().Shrink(1)
+				if src.count > 0 {
+					ui.Box(c).Grow(1)
+					ui.Text(c, fmt.Sprintf("%d", src.count)).
+						FontSize(10.5).TextColor(p.faint)
+				}
+			})
+		}
 
 		ui.Box(c).Height(1).Background(p.hairline).MarginY(4)
 
@@ -255,7 +278,7 @@ func (a *app) recentItems(n int) []media.Item {
 		at   int64
 	}
 	var list []watched
-	for _, it := range a.lib.Items() {
+	for _, it := range a.items() {
 		p, ok := a.store.Progress(it.ID)
 		if !ok || p.Updated == 0 || !p.Started() {
 			continue
@@ -275,6 +298,9 @@ func (a *app) recentItems(n int) []media.Item {
 }
 
 func (a *app) sourceLine() string {
+	if a.source != 0 {
+		return fmt.Sprintf("%s · %d 个", a.sourceName(), len(a.pluginItems))
+	}
 	if a.lib == nil {
 		return "本地视频"
 	}
@@ -285,6 +311,9 @@ func (a *app) sourceLine() string {
 }
 
 func (a *app) libraryLine() string {
+	if a.source != 0 {
+		return a.sourceLine()
+	}
 	if a.lib == nil {
 		return ""
 	}

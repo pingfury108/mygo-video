@@ -81,11 +81,11 @@ func (p *Proxy) Close() error {
 	return p.srv.Close()
 }
 
-// Open starts serving s and answers the URL to play: its playlist for HLS,
-// or the file itself.
-func (p *Proxy) Open(s Stream) (string, error) {
+// Open starts serving s and answers the URL to play, and the token to stop
+// it with: its playlist for HLS, or the file itself.
+func (p *Proxy) Open(s Stream) (string, string, error) {
 	if s.URL == "" {
-		return "", errors.New("streamproxy: no URL")
+		return "", "", errors.New("streamproxy: no URL")
 	}
 	if s.Type == "" {
 		s.Type = "mp4"
@@ -95,7 +95,7 @@ func (p *Proxy) Open(s Stream) (string, error) {
 	}
 	token, err := newToken()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	p.mu.Lock()
 	p.streams[token] = &s
@@ -105,7 +105,7 @@ func (p *Proxy) Open(s Stream) (string, error) {
 	if s.Type == "hls" {
 		kind = "p"
 	}
-	return p.base + "/s/" + token + "/" + kind + "/" + encode(s.URL), nil
+	return p.base + "/s/" + token + "/" + kind + "/" + encode(s.URL), token, nil
 }
 
 // Forget stops serving a stream.

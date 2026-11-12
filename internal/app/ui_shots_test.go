@@ -13,6 +13,7 @@ import (
 
 	"mygo-video/internal/local"
 	"mygo-video/internal/media"
+	"mygo-video/internal/plugin"
 	"mygo-video/internal/store"
 )
 
@@ -141,4 +142,70 @@ func fakeFrame(w, h int, base color.RGBA) *ui.Bitmap {
 		}
 	}
 	return ui.NewBitmap(img)
+}
+
+// TestPluginShots renders a plugin's home and a video of it, with the
+// videos filled in as the plugin would have listed them.
+func TestPluginShots(t *testing.T) {
+	dir := os.Getenv("SHOTS")
+	if dir == "" {
+		t.Skip("SHOTS is not set")
+	}
+	a := shotApp(t)
+	a.plugins = []*plugin.Plugin{loadTestPlugin(t)}
+	a.source = 1
+	v := media.Video{
+		ID:       "v1",
+		Name:     "BipBop",
+		Overview: "Apple 的公开 HLS 测试流，用来验证代理、HLS 重写和播放。",
+	}
+	a.pluginBrowse = &media.Browse{
+		Title:    "演示源",
+		Subtitle: "公开的 HLS 测试流",
+		Sections: []media.Section{{Title: "测试流", Videos: []media.Video{v}}},
+	}
+	a.pluginItems = []media.Item{itemFromVideo("demo", v)}
+	a.current = a.pluginItems[0]
+
+	tt := ui.NewTester(a.view, 1180, 780)
+	shoot := func(name string) {
+		t.Helper()
+		tt.Frame()
+		tt.Frame()
+		f, err := os.Create(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := png.Encode(f, tt.Image()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.route = pageHome
+	shoot("09-plugin-home.png")
+	a.route = pageDetail
+	shoot("10-plugin-detail.png")
+}
+
+func loadTestPlugin(t *testing.T) *plugin.Plugin {
+	t.Helper()
+	dir := t.TempDir()
+	pd := filepath.Join(dir, "plugins", "demo")
+	if err := os.MkdirAll(pd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"id":"demo","name":"演示源","apiVersion":1,"main":"index.js","permissions":{"network":["example.com"]}}`
+	js := `export function home(){return {title:"Demo",sections:[]}};
+export function play(){return {url:"https://example.com/x.m3u8",type:"hls"}}`
+	if err := os.WriteFile(filepath.Join(pd, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pd, "index.js"), []byte(js), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := plugin.Load(pd, filepath.Join(dir, "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

@@ -9,14 +9,22 @@ import (
 // homePage leads with what the listener was watching, then what is new.
 func (a *app) homePage(c *ui.Context) {
 	p := colors()
-	items := a.lib.Items()
+	a.loadPluginHome()
+	items := a.items()
 	ui.Row(c).Height(56).PaddingX(32).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
 		ui.Text(c, "首页").FontSize(15).FontWeight(600)
-		ui.Text(c, "本地视频").FontSize(12).TextColor(p.faint)
+		ui.Text(c, a.sourceName()).FontSize(12).TextColor(p.faint)
 		ui.Box(c).Grow(1)
 		iconButton(c, iconSearch, 16, "搜索", func() { a.goPage(pageSearch) })
-		iconButton(c, iconRefresh, 16, "重新扫描", func() { go a.scan() })
+		if a.source == 0 {
+			iconButton(c, iconRefresh, 16, "重新扫描", func() { go a.scan() })
+		}
 	})
+
+	if a.source != 0 {
+		a.pluginHome(c)
+		return
+	}
 
 	ui.Scroll(c).Grow(1).TrackScroll(&a.homeScroll).Children(func() {
 		ui.Column(c).Padding(8, 32, 40, 32).Gap(26).Children(func() {
@@ -59,6 +67,49 @@ func (a *app) homePage(c *ui.Context) {
 
 			if len(items) > 12 {
 				ghostButton(c, "查看全部", iconForward, func() { a.goPage(pageLibrary) })
+			}
+		})
+	})
+}
+
+// pluginHome is a source's own page, in the sections it gives.
+func (a *app) pluginHome(c *ui.Context) {
+	if a.pluginErr != "" {
+		ui.Column(c).Grow(1).Children(func() {
+			emptyState(c, "这个来源没能载入", a.pluginErr, func() {
+				a.pluginBrowse = nil
+				a.pluginErr = ""
+				a.invalidate()
+			})
+		})
+		return
+	}
+	b := a.pluginBrowse
+	if b == nil {
+		ui.Column(c).Grow(1).Children(func() {
+			emptyState(c, "正在载入…", "", nil)
+		})
+		return
+	}
+	id := a.plugins[a.source-1].Info().ID
+	ui.Scroll(c).Grow(1).TrackScroll(&a.homeScroll).Children(func() {
+		ui.Column(c).Padding(8, 32, 40, 32).Gap(26).Children(func() {
+			if len(b.Sections) == 0 {
+				emptyState(c, "这个来源还没有内容", "", nil)
+			}
+			for _, sec := range b.Sections {
+				if len(sec.Videos) == 0 {
+					continue
+				}
+				videos := sec.Videos
+				ui.Column(c).Gap(12).Children(func() {
+					sectionHead(c, sec.Title, "", nil)
+					items := make([]media.Item, 0, len(videos))
+					for _, v := range videos {
+						items = append(items, itemFromVideo(id, v))
+					}
+					a.cardRow(c, items, 216)
+				})
 			}
 		})
 	})

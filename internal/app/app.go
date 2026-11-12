@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,7 +14,9 @@ import (
 
 	"mygo-video/internal/local"
 	"mygo-video/internal/media"
+	"mygo-video/internal/plugin"
 	"mygo-video/internal/store"
+	"mygo-video/internal/streamproxy"
 	"mygo-video/internal/subtitle"
 	"mygo-video/internal/thumb"
 )
@@ -55,6 +58,24 @@ type app struct {
 	dataDir string
 	// sourceMenu shows the list of sources, from the sidebar's foot.
 	sourceMenu bool
+
+	// plugins are the sources dropped in, none started yet; proxy is where
+	// their streams are served to the player. source is 0 for the library
+	// on this computer, and else the plugin at source-1.
+	plugins    []*plugin.Plugin
+	proxy      *streamproxy.Proxy
+	source     int
+	proxyToken string
+
+	// What the source being shown has: its home page, the videos of it,
+	// the search last run, and the error that stopped them.
+	pluginBrowse *media.Browse
+	pluginItems  []media.Item
+	pluginSearch []media.Item
+	pluginErr    string
+	pluginBusy   bool
+	searchQuery  string
+	searchBusy   bool
 
 	// history and forward are the pages gone back from and forward to,
 	// for the sidebar's arrows.
@@ -126,6 +147,13 @@ func (a *app) start() {
 	a.thumbs = map[string]*ui.Bitmap{}
 	a.thumbBusy = map[string]bool{}
 	a.thumbUsed = map[string]time.Time{}
+
+	a.proxy, _ = streamproxy.New()
+	plugin.SetOpenURL(mygo.Shell.OpenExternal)
+	plugin.SetAppVersion(mygo.App.Version())
+	pluginsDir := filepath.Join(dir, "plugins")
+	_ = os.MkdirAll(pluginsDir, 0o700)
+	a.plugins = plugin.Discover(pluginsDir, filepath.Join(dir, "plugin-data"))
 	// What the last run found shows at once, while the new scan goes on.
 	if cached := st.Items(); len(cached) > 0 {
 		var at time.Time
@@ -266,8 +294,103 @@ func (a *app) openDetail(it media.Item) {
 	a.invalidate()
 }
 
+// items is what the source being shown lists.
+func (a *app) items() []media.Item {
+	if a.source == 0 {
+		return a.lib.Items()
+	}
+	return a.pluginItems
+}
+
+// sourceName is the source being shown.
+func (a *app) sourceName() string {
+	if a.source == 0 || a.source > len(a.plugins) {
+		return "本地视频"
+	}
+	return a.plugins[a.source-1].Info().Name
+}
+
+func (a *app) pluginByID(id string) *plugin.Plugin {
+	for _, p := range a.plugins {
+		if p.Info().ID == id {
+			return p
+		}
+	}
+	return nil
+}
+
+// switchSource shows another source and forgets what the last one listed.
+func (a *app) switchSource(i int) {
+	if i < 0 || i > len(a.plugins) || i == a.source {
+		return
+	}
+	a.source = i
+	a.sourceMenu = false
+	a.pluginBrowse = nil
+	a.pluginItems = nil
+	a.pluginSearch = nil
+	a.pluginErr = ""
+	a.searchQuery = ""
+	a.route = pageHome
+	a.invalidate()
+}
+
+// loadPluginHome asks the source being shown for its home page, once.
+func (a *app) loadPluginHome() {
+	if a.source == 0 || a.pluginBusy || a.pluginBrowse != nil {
+		return
+	}
+	p := a.plugins[a.source-1]
+	id := p.Info().ID
+	a.pluginBusy = true
+	go func() {
+		b, err := p.Home()
+		mygo.RunOnMain(func() {
+			a.pluginBusy = false
+			if a.source == 0 || a.plugins[a.source-1].Info().ID != id {
+				return
+			}
+			if err != nil {
+				a.pluginErr = err.Error()
+				a.invalidate()
+				return
+			}
+			a.pluginErr = ""
+			a.pluginBrowse = b
+			a.pluginItems = nil
+			for _, sec := range b.Sections {
+				for _, v := range sec.Videos {
+					a.pluginItems = append(a.pluginItems, itemFromVideo(id, v))
+				}
+			}
+			a.invalidate()
+		})
+	}()
+}
+
+// itemFromVideo is a video a plugin listed, as the pages show it.
+func itemFromVideo(source string, v media.Video) media.Item {
+	return media.Item{
+		ID:       source + ":" + v.ID,
+		RemoteID: v.ID,
+		Source:   source,
+		Name:     v.Name,
+		Series:   v.Series,
+		Season:   v.Season,
+		Episode:  v.Episode,
+		Duration: v.Duration,
+		Poster:   v.Poster,
+		Overview: v.Overview,
+		URL:      v.URL,
+	}
+}
+
 // play opens an item, from the start or where the listener stopped.
 func (a *app) play(it media.Item, fromStart bool) {
+	if it.Source != "" {
+		a.playPlugin(it, fromStart)
+		return
+	}
 	a.closePlayer()
 	p, err := video.Open(it.Path)
 	if err != nil {
@@ -275,18 +398,88 @@ func (a *app) play(it media.Item, fromStart bool) {
 		a.openDetail(it)
 		return
 	}
+	a.subs = subtitle.Load(it.Path)
+	a.subsOn = len(a.subs) > 0
+	a.beginPlayback(it, p, fromStart)
+}
+
+// playPlugin asks the plugin for a stream and plays it through the proxy,
+// or opens the page where the plugin plays it itself.
+func (a *app) playPlugin(it media.Item, fromStart bool) {
+	p := a.pluginByID(it.Source)
+	if p == nil {
+		a.say("这个来源已经不在了")
+		return
+	}
+	go func() {
+		pb, err := p.Play(it.RemoteID, "")
+		mygo.RunOnMain(func() { a.openPlayback(it, pb, err, fromStart) })
+	}()
+}
+
+func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromStart bool) {
+	if err != nil {
+		switch {
+		case errors.Is(err, plugin.ErrDRM):
+			a.say("受 DRM 保护，需要在官方 App 播放")
+		case errors.Is(err, plugin.ErrSignIn):
+			a.say("需要先登录这个来源")
+		case errors.Is(err, plugin.ErrSetup):
+			a.say("这个来源还需要设置")
+		case errors.Is(err, plugin.ErrUnavailable):
+			a.say("这个视频暂时不可用")
+		default:
+			a.say("%v", err)
+		}
+		return
+	}
+	if pb.Open != "" {
+		if err := mygo.Shell.OpenExternal(pb.Open); err != nil {
+			a.say("%v", err)
+			return
+		}
+		a.say("已在浏览器打开")
+		return
+	}
+	if p := a.pluginByID(it.Source); p != nil && !p.AllowsHost(pb.URL) {
+		a.say("这个来源没有访问该地址的权限")
+		return
+	}
+	a.closePlayer()
+	url, token, err := a.proxy.Open(streamproxy.Stream{
+		URL:     pb.URL,
+		Type:    pb.Type,
+		Headers: pb.Headers,
+	})
+	if err != nil {
+		a.say("%v", err)
+		return
+	}
+	player, err := video.OpenURL(url)
+	if err != nil {
+		a.proxy.Forget(token)
+		a.say("%v", err)
+		return
+	}
+	a.proxyToken = token
+	a.subs = nil
+	a.subsOn = false
+	a.beginPlayback(it, player, fromStart)
+}
+
+// beginPlayback makes p the video showing, from where the listener stopped
+// unless asked to start over.
+func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	a.player = p
 	a.playing = it
 	a.fresh = fromStart
 	a.route = pagePlayer
-	a.subs = subtitle.Load(it.Path)
-	a.subsOn = len(a.subs) > 0
 	a.rate = 1
 	a.drawer = false
 	a.uiHidden = false
 	a.uiShown = time.Now()
-	p.SetRate(1)
 	a.seekedAt = time.Time{}
+	p.SetRate(1)
 	p.SetVolume(a.volume)
 	if !fromStart {
 		if prog, ok := a.store.Progress(it.ID); ok && prog.Started() {
@@ -303,15 +496,16 @@ func (a *app) leavePlayer() {
 	a.seek = 0
 	a.drawer = false
 	a.uiHidden = false
-	if a.player != nil {
-		a.player.Close()
-		a.player = nil
-	}
+	a.closePlayer()
 	a.route = pageDetail
 	a.invalidate()
 }
 
 func (a *app) closePlayer() {
+	if a.proxyToken != "" && a.proxy != nil {
+		a.proxy.Forget(a.proxyToken)
+		a.proxyToken = ""
+	}
 	if a.player == nil {
 		return
 	}
@@ -350,6 +544,12 @@ func (a *app) saveProgress() {
 		Done:     done,
 		Updated:  time.Now().UnixMilli(),
 	})
+	if a.playing.Source != "" {
+		if p := a.pluginByID(a.playing.Source); p != nil {
+			id := a.playing.RemoteID
+			go p.Progress(id, pos, dur, done)
+		}
+	}
 }
 
 // tick keeps the stored progress fresh while a video plays.

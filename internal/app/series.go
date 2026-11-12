@@ -16,7 +16,7 @@ func (a *app) seriesOf(it media.Item) []media.Item {
 		return nil
 	}
 	var out []media.Item
-	for _, x := range a.lib.Items() {
+	for _, x := range a.items() {
 		if x.Series == it.Series {
 			out = append(out, x)
 		}

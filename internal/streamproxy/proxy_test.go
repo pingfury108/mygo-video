@@ -74,7 +74,7 @@ func TestHLSPlaylist(t *testing.T) {
 	}
 	defer p.Close()
 
-	entry, err := p.Open(Stream{URL: up.URL + "/master.m3u8", Type: "hls", Headers: map[string]string{"Referer": referer}})
+	entry, _, err := p.Open(Stream{URL: up.URL + "/master.m3u8", Type: "hls", Headers: map[string]string{"Referer": referer}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestHLSEncrypted(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	entry, err := p.Open(Stream{URL: up.URL + "/media.m3u8", Type: "hls", Headers: map[string]string{"Referer": referer}})
+	entry, _, err := p.Open(Stream{URL: up.URL + "/media.m3u8", Type: "hls", Headers: map[string]string{"Referer": referer}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestFileRange(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	u, err := p.Open(Stream{URL: up.URL + "/movie.mp4", Type: "mp4", Headers: map[string]string{"Referer": referer}})
+	u, _, err := p.Open(Stream{URL: up.URL + "/movie.mp4", Type: "mp4", Headers: map[string]string{"Referer": referer}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestMissingHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	entry, err := p.Open(Stream{URL: up.URL + "/media.m3u8", Type: "hls"})
+	entry, _, err := p.Open(Stream{URL: up.URL + "/media.m3u8", Type: "hls"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestForget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	entry, err := p.Open(Stream{URL: up.URL + "/media.m3u8", Type: "hls", Headers: map[string]string{"Referer": referer}})
+	entry, _, err := p.Open(Stream{URL: up.URL + "/media.m3u8", Type: "hls", Headers: map[string]string{"Referer": referer}})
 	if err != nil {
 		t.Fatal(err)
 	}
