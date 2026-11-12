@@ -27,6 +27,7 @@ func (a *app) makeWebDAV() {
 	a.webdavURL, a.webdavUser, a.webdavPass = cfg.URL, cfg.User, cfg.Pass
 	a.webdav = nil
 	a.webdavPath, a.webdavLoaded = "", ""
+	a.webdavHasLoaded = false
 	a.webdavEntries, a.webdavVideos = nil, nil
 	a.webdavErr = ""
 	if strings.TrimSpace(cfg.URL) == "" {
@@ -64,6 +65,7 @@ func (a *app) saveWebDAV() {
 func (a *app) openWebDAVPath(p string) {
 	a.webdavPath = p
 	a.webdavLoaded = ""
+	a.webdavHasLoaded = false
 	a.webdavEntries = nil
 	a.webdavVideos = nil
 	a.webdavErr = ""
@@ -73,7 +75,7 @@ func (a *app) openWebDAVPath(p string) {
 
 // loadWebDAV lists the folder showing, once.
 func (a *app) loadWebDAV() {
-	if a.webdav == nil || a.webdavBusy || a.webdavLoaded == a.webdavPath {
+	if a.webdav == nil || a.webdavBusy || (a.webdavHasLoaded && a.webdavLoaded == a.webdavPath) {
 		return
 	}
 	dir := a.webdavPath
@@ -87,6 +89,7 @@ func (a *app) loadWebDAV() {
 				return
 			}
 			a.webdavLoaded = dir
+			a.webdavHasLoaded = true
 			if err != nil {
 				a.webdavErr = err.Error()
 				a.invalidate()
@@ -189,7 +192,7 @@ func (a *app) webdavHome(c *ui.Context) {
 		})
 		return
 	}
-	if a.webdavBusy && len(a.webdavEntries) == 0 {
+	if a.webdavBusy && !a.webdavHasLoaded {
 		ui.Column(c).Grow(1).Children(func() {
 			emptyState(c, "正在载入…", "", nil)
 		})

@@ -110,17 +110,18 @@ type app struct {
 
 	// The built-in WebDAV source: the server, what it listed, and where the
 	// pages are.
-	webdav        *webdav.Client
-	webdavURL     string
-	webdavUser    string
-	webdavPass    string
-	webdavPath    string
-	webdavLoaded  string
-	webdavEntries []webdav.Entry
-	webdavVideos  []media.Item
-	webdavBusy    bool
-	webdavErr     string
-	webdavScroll  ui.ScrollState
+	webdav          *webdav.Client
+	webdavURL       string
+	webdavUser      string
+	webdavPass      string
+	webdavPath      string
+	webdavLoaded    string
+	webdavHasLoaded bool
+	webdavEntries   []webdav.Entry
+	webdavVideos    []media.Item
+	webdavBusy      bool
+	webdavErr       string
+	webdavScroll    ui.ScrollState
 
 	// history and forward are the pages gone back from and forward to,
 	// for the sidebar's arrows.
@@ -398,6 +399,7 @@ func (a *app) switchSource(i int) {
 	if i == sourceWebDAV {
 		a.webdavPath = ""
 		a.webdavLoaded = ""
+		a.webdavHasLoaded = false
 		a.webdavEntries = nil
 		a.webdavVideos = nil
 		a.webdavErr = ""

@@ -244,6 +244,7 @@ func TestWebDAVShots(t *testing.T) {
 	a.webdavURL = "http://127.0.0.1:1/dav"
 	a.source = sourceWebDAV
 	a.webdavLoaded = ""
+	a.webdavHasLoaded = true
 	a.webdavEntries = []webdav.Entry{
 		{Path: "Movies", Name: "Movies", Dir: true},
 		{Path: "Shows", Name: "Shows", Dir: true},
