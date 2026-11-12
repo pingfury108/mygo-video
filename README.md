@@ -81,6 +81,13 @@ go tool mygo build    # 打包到 build/
 
 复制 `examples/demo-plugin` 到数据目录的 `plugins/`，重启后侧栏底部就能切到「演示源」，播放 Apple 的公开 HLS 测试流。
 
+设置页的「插件」里能做：
+
+- **安装插件…**：选一个含 `plugin.json` 的文件夹，复制到 `plugins/` 并重新加载
+- **设置项**：manifest 的 `settings` 变成输入框，改完即保存
+- **账号**：`登录` / `退出`，调插件的 `signIn` / `signOut` / `account`
+- **海报**：从 `poster` 字段加载网络图片，受 `permissions.network` 限制
+
 ## 结构
 
 ```
@@ -116,7 +123,7 @@ python3 -m http.server 4311 --directory designs
 
 ## 已知限制
 
-- 插件是首版：没有安装界面（手动放进数据目录）、没有账号界面、没有插件设置界面
+- 插件是首版：安装只能选文件夹（zip / GitHub 一键安装未做），账号只做了 `signIn` / `signOut`，没有二维码与内嵌登录页
 - 封面只是正片里的一帧，不是刮削来的海报；没有 `ffmpeg` 时回退到首字色块
 - 字幕只读外挂的 `.srt` / `.vtt`，不读内嵌字幕轨，也不支持 ASS 样式
 - 没有弹幕（等插件来源）

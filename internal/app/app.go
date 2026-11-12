@@ -52,6 +52,11 @@ type app struct {
 	thumbBusy map[string]bool
 	thumbUsed map[string]time.Time
 
+	// posters are the pictures plugins give for their videos, by URL.
+	posters    map[string]*ui.Bitmap
+	posterBusy map[string]bool
+	posterUsed map[string]time.Time
+
 	route   page
 	current media.Item
 	query   string
@@ -66,6 +71,15 @@ type app struct {
 	proxy      *streamproxy.Proxy
 	source     int
 	proxyToken string
+
+	// The plugin pages: which settings are being typed, who is signed in,
+	// and where plugins are installed from.
+	pluginsDir        string
+	pluginDataDir     string
+	settingTexts      map[string]*string
+	pluginAccounts    map[string]*plugin.Account
+	pluginAccountBusy map[string]bool
+	pluginChecked     map[string]bool
 
 	// What the source being shown has: its home page, the videos of it,
 	// the search last run, and the error that stopped them.
@@ -147,13 +161,21 @@ func (a *app) start() {
 	a.thumbs = map[string]*ui.Bitmap{}
 	a.thumbBusy = map[string]bool{}
 	a.thumbUsed = map[string]time.Time{}
+	a.posters = map[string]*ui.Bitmap{}
+	a.posterBusy = map[string]bool{}
+	a.posterUsed = map[string]time.Time{}
+	a.settingTexts = map[string]*string{}
+	a.pluginAccounts = map[string]*plugin.Account{}
+	a.pluginAccountBusy = map[string]bool{}
+	a.pluginChecked = map[string]bool{}
 
 	a.proxy, _ = streamproxy.New()
 	plugin.SetOpenURL(mygo.Shell.OpenExternal)
 	plugin.SetAppVersion(mygo.App.Version())
-	pluginsDir := filepath.Join(dir, "plugins")
-	_ = os.MkdirAll(pluginsDir, 0o700)
-	a.plugins = plugin.Discover(pluginsDir, filepath.Join(dir, "plugin-data"))
+	a.pluginsDir = filepath.Join(dir, "plugins")
+	a.pluginDataDir = filepath.Join(dir, "plugin-data")
+	_ = os.MkdirAll(a.pluginsDir, 0o700)
+	a.plugins = plugin.Discover(a.pluginsDir, a.pluginDataDir)
 	// What the last run found shows at once, while the new scan goes on.
 	if cached := st.Items(); len(cached) > 0 {
 		var at time.Time

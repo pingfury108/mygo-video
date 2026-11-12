@@ -1,8 +1,12 @@
 package app
 
 import (
+	"fmt"
+
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+
+	"mygo-video/internal/plugin"
 )
 
 // settingsPage holds what the app does with files, and what it will do with
@@ -30,21 +34,28 @@ func (a *app) settingsPage(c *ui.Context) {
 						go a.scan()
 						a.invalidate()
 					})
-					ui.Text(c, a.libraryLine()).FontSize(11).TextColor(p.faint)
+					ui.Text(c, fmt.Sprintf("%d 个视频 · %d 个文件夹", a.lib.Count(), len(a.lib.Roots()))).
+						FontSize(11).TextColor(p.faint)
 				})
 			})
 
 			settingsCard(c, "插件", func() {
-				ui.Text(c, "插件把更多来源接进来：本地网络、网盘，以及视频站点。").
-					FontSize(12).TextColor(p.muted)
-				ui.Text(c, "L1 直链：插件给出可播放的流，经本机代理注入请求头后播放。").
-					FontSize(11.5).TextColor(p.faint)
-				ui.Text(c, "L2 目录：插件提供搜索、详情与追剧；受 DRM 保护的正片在官方 App 中播放。").
-					FontSize(11.5).TextColor(p.faint)
-				ui.Row(c).Children(func() {
-					ui.Text(c, "插件系统在下一个版本到来。").
-						FontSize(11).TextColor(p.faint).PaddingY(6)
+				ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
+					ui.Text(c, "插件把更多来源接进来：本地网络、网盘，以及视频站点。").
+						FontSize(12).TextColor(p.muted)
+					ui.Box(c).Grow(1)
+					ghostButton(c, "安装插件…", iconFolder, a.installPlugin)
 				})
+				if len(a.plugins) == 0 {
+					ui.Text(c, "还没有插件。示例在仓库的 examples/demo-plugin。").
+						FontSize(11.5).TextColor(p.faint)
+					ui.Text(c, "插件目录："+a.pluginsDir).
+						FontSize(11).TextColor(p.faint)
+					return
+				}
+				for _, pl := range a.plugins {
+					a.pluginSettings(c, pl)
+				}
 			})
 
 			settingsCard(c, "播放", func() {
@@ -72,6 +83,56 @@ func settingsCard(c *ui.Context, title string, body func()) {
 		ui.Text(c, title).FontSize(13.5).FontWeight(600)
 		body()
 	})
+}
+
+// pluginSettings is one plugin: who is signed in, and what it asks for.
+func (a *app) pluginSettings(c *ui.Context, pl *plugin.Plugin) {
+	p := colors()
+	info := pl.Info()
+	ui.Column(c).Gap(8).Padding(12).Radius(9).
+		Background(p.bg).Border(1, p.hairline).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, info.Name).FontSize(12.5).FontWeight(600)
+			if info.Version != "" {
+				ui.Text(c, "v"+info.Version).FontSize(10.5).TextColor(p.faint)
+			}
+			ui.Box(c).Grow(1)
+			a.pluginAccount(c, pl)
+		})
+		for _, st := range info.Settings {
+			key := info.ID + "/" + st.Key
+			value := a.settingTexts[key]
+			if value == nil {
+				v := pl.Setting(st.Key)
+				value = &v
+				a.settingTexts[key] = value
+			}
+			ui.Column(c).Gap(4).Children(func() {
+				ui.Text(c, st.Label).FontSize(11.5).TextColor(p.muted)
+				input := ui.TextInput(c, value).Placeholder(st.Help).Height(32).MaxWidth(460)
+				if input.Changed() {
+					_ = pl.SetSetting(st.Key, *value)
+				}
+			})
+		}
+	})
+}
+
+func (a *app) pluginAccount(c *ui.Context, pl *plugin.Plugin) {
+	p := colors()
+	id := pl.Info().ID
+	if a.pluginAccountBusy[id] {
+		ui.Text(c, "检查账号…").FontSize(11).TextColor(p.faint)
+		return
+	}
+	if acc := a.accountFor(pl); acc != nil {
+		ui.Text(c, "已登录："+acc.Name).FontSize(11).TextColor(p.muted)
+		ghostButton(c, "退出", nil, func() { a.signOutPlugin(pl) })
+		return
+	}
+	if pl.Can("signIn") {
+		ghostButton(c, "登录", nil, func() { a.signInPlugin(pl) })
+	}
 }
 
 func version() string {

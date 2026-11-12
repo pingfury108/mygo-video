@@ -166,6 +166,14 @@ func TestPluginShots(t *testing.T) {
 	}
 	a.pluginItems = []media.Item{itemFromVideo("demo", v)}
 	a.current = a.pluginItems[0]
+	a.settingTexts = map[string]*string{}
+	a.pluginAccounts = map[string]*plugin.Account{}
+	a.pluginAccountBusy = map[string]bool{}
+	a.pluginChecked = map[string]bool{"demo": true}
+	a.pluginsDir = "/tmp/mygo-video-plugins"
+	a.posters = map[string]*ui.Bitmap{}
+	a.posterBusy = map[string]bool{}
+	a.posterUsed = map[string]time.Time{}
 
 	tt := ui.NewTester(a.view, 1180, 780)
 	shoot := func(name string) {
@@ -185,6 +193,8 @@ func TestPluginShots(t *testing.T) {
 	shoot("09-plugin-home.png")
 	a.route = pageDetail
 	shoot("10-plugin-detail.png")
+	a.route = pageSettings
+	shoot("11-plugin-settings.png")
 }
 
 func loadTestPlugin(t *testing.T) *plugin.Plugin {
@@ -194,7 +204,7 @@ func loadTestPlugin(t *testing.T) *plugin.Plugin {
 	if err := os.MkdirAll(pd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"id":"demo","name":"演示源","apiVersion":1,"main":"index.js","permissions":{"network":["example.com"]}}`
+	manifest := `{"id":"demo","name":"演示源","version":"0.1.0","apiVersion":1,"main":"index.js","permissions":{"network":["example.com"]},"settings":[{"key":"region","label":"地区","help":"如 cn"}]}`
 	js := `export function home(){return {title:"Demo",sections:[]}};
 export function play(){return {url:"https://example.com/x.m3u8",type:"hls"}}`
 	if err := os.WriteFile(filepath.Join(pd, "plugin.json"), []byte(manifest), 0o644); err != nil {

@@ -131,6 +131,10 @@ func (a *app) thumbArt(c *ui.Context, it media.Item, initialSize float32) {
 		ui.Image(c, b).Fill().Fit(ui.Cover)
 		return
 	}
+	if b := a.posterBitmap(it); b != nil {
+		ui.Image(c, b).Fill().Fit(ui.Cover)
+		return
+	}
 	base := posterColor(it.ID)
 	wash := base.Mix(ui.RGBA(255, 255, 255, 0.5), 0.5)
 	ui.Box(c).Fill().RadialGradient(ui.RadialGradient{

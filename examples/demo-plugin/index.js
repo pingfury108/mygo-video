@@ -5,6 +5,8 @@
 const STREAM =
   "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8";
 
+const ACCOUNT = { id: "demo", name: "演示账号" };
+
 export async function home() {
   return {
     title: "演示源",
@@ -52,6 +54,15 @@ export async function play() {
 
 export async function progress() {}
 
+export function signIn() {
+  host.storage.set("signedIn", true);
+  return ACCOUNT;
+}
+
+export function signOut() {
+  host.storage.remove("signedIn");
+}
+
 export function account() {
-  return null;
+  return host.storage.get("signedIn") ? ACCOUNT : null;
 }
