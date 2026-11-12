@@ -83,7 +83,10 @@ go tool mygo build    # 打包到 build/
 
 设置页的「插件」里能做：
 
-- **安装插件…**：选一个含 `plugin.json` 的文件夹，复制到 `plugins/` 并重新加载
+- **安装插件…**：从三种地方装
+  - **文件夹**：选一个含 `plugin.json` 的文件夹
+  - **zip**：解压后找 `plugin.json`，拒绝跑到目录外的路径
+  - **GitHub**：填 `owner/repo` 或仓库地址，取最新 release 里适合本平台的 zip；没有 release 就用默认分支
 - **设置项**：manifest 的 `settings` 变成输入框，改完即保存
 - **账号**：`登录` / `退出`，调插件的 `signIn` / `signOut` / `account`
 - **海报**：从 `poster` 字段加载网络图片，受 `permissions.network` 限制
@@ -123,7 +126,7 @@ python3 -m http.server 4311 --directory designs
 
 ## 已知限制
 
-- 插件是首版：安装只能选文件夹（zip / GitHub 一键安装未做），账号只做了 `signIn` / `signOut`，没有二维码与内嵌登录页
+- 插件是首版：安装支持文件夹 / zip / GitHub 仓库，没有商店与签名校验；账号只做了 `signIn` / `signOut`，没有二维码与内嵌登录页
 - 封面只是正片里的一帧，不是刮削来的海报；没有 `ffmpeg` 时回退到首字色块
 - 字幕只读外挂的 `.srt` / `.vtt`，不读内嵌字幕轨，也不支持 ASS 样式
 - 没有弹幕（等插件来源）

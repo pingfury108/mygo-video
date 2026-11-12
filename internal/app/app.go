@@ -81,6 +81,15 @@ type app struct {
 	pluginAccountBusy map[string]bool
 	pluginChecked     map[string]bool
 
+	// installMenu and installDialog are the ways to install a plugin, and
+	// where a GitHub address is typed.
+	installMenu   bool
+	installDialog bool
+	installFocus  bool
+	installURL    string
+	installBusy   bool
+	installErr    string
+
 	// What the source being shown has: its home page, the videos of it,
 	// the search last run, and the error that stopped them.
 	pluginBrowse *media.Browse

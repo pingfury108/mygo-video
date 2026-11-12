@@ -35,6 +35,7 @@ func (a *app) view(c *ui.Context) {
 		c.Toast(a.toast)
 		a.toast = ""
 	}
+	a.installDialogView(c)
 }
 
 func (a *app) page(c *ui.Context) {

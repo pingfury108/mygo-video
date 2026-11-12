@@ -44,7 +44,7 @@ func (a *app) settingsPage(c *ui.Context) {
 					ui.Text(c, "插件把更多来源接进来：本地网络、网盘，以及视频站点。").
 						FontSize(12).TextColor(p.muted)
 					ui.Box(c).Grow(1)
-					ghostButton(c, "安装插件…", iconFolder, a.installPlugin)
+					a.installMenuButton(c)
 				})
 				if len(a.plugins) == 0 {
 					ui.Text(c, "还没有插件。示例在仓库的 examples/demo-plugin。").

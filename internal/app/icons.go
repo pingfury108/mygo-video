@@ -37,4 +37,6 @@ var (
 	iconNext     = fillIcon(`<path d="M16 5h2v14h-2zM5 5.5v13L15 12z"/>`)
 	iconCheck    = strokeIcon(`<path d="m5 12 4 4L19 6"/>`)
 	iconDown     = strokeIcon(`<path d="m6 9 6 6 6-6"/>`)
+	iconArchive  = strokeIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v5M9 7h6M9 11h6M12 13v4"/>`)
+	iconGlobe    = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/>`)
 )

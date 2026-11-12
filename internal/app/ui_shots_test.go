@@ -195,6 +195,13 @@ func TestPluginShots(t *testing.T) {
 	shoot("10-plugin-detail.png")
 	a.route = pageSettings
 	shoot("11-plugin-settings.png")
+	a.installMenu = true
+	shoot("12-install-menu.png")
+	a.installMenu = false
+	a.installDialog = true
+	a.installURL = "egoist/mygo-music-plugin"
+	shoot("13-install-github.png")
+	a.installDialog = false
 }
 
 func loadTestPlugin(t *testing.T) *plugin.Plugin {
