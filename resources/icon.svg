@@ -1,0 +1,30 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1e25"/>
+      <stop offset="1" stop-color="#0c0e12"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#f6bd7c"/>
+      <stop offset="0.55" stop-color="#e7a25e"/>
+      <stop offset="1" stop-color="#d0813c"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.44" r="0.55">
+      <stop offset="0" stop-color="#e7a25e" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#e7a25e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#panel)"/>
+  <circle cx="512" cy="500" r="288" fill="url(#glow)"/>
+
+  <g transform="translate(494 500)">
+    <path d="M -120 -172 L 208 0 L -120 172 Z"
+          fill="url(#accent)"
+          stroke="url(#accent)"
+          stroke-width="58"
+          stroke-linejoin="round"/>
+  </g>
+
+  <rect x="372" y="752" width="280" height="7" rx="3.5" fill="#e7a25e" opacity="0.4"/>
+</svg>
