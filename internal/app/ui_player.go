@@ -33,7 +33,7 @@ func (a *app) playerPage(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyComma, func() { a.playNeighbor(-1) })
 	c.OnShortcut(0, ui.KeyPeriod, func() { a.playNeighbor(1) })
 
-	if a.drawer || !pl.Playing() {
+	if a.drawer || !pl.Playing() || !pl.Ready() {
 		a.uiHidden = false
 	} else if !a.uiHidden && time.Since(a.uiShown) > hideAfter {
 		a.uiHidden = true

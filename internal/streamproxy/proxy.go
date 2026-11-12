@@ -185,7 +185,9 @@ func (p *Proxy) serveBytes(w http.ResponseWriter, r *http.Request, s *Stream, ra
 	iv := r.URL.Query().Get("iv")
 	seq, _ := strconv.ParseUint(r.URL.Query().Get("seq"), 10, 64)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	// A file goes on for as long as the player reads it: its own request
+	// goes away when the player closes the connection.
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	rng := r.Header.Get("Range")
 	// A decrypted segment is served whole: its length is only known once it
@@ -193,7 +195,11 @@ func (p *Proxy) serveBytes(w http.ResponseWriter, r *http.Request, s *Stream, ra
 	if key != "" {
 		rng = ""
 	}
-	resp, err := p.fetch(ctx, s, raw, rng)
+	method := http.MethodGet
+	if r.Method == http.MethodHead {
+		method = http.MethodHead
+	}
+	resp, err := p.fetchMethod(ctx, s, raw, rng, method)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -201,6 +207,14 @@ func (p *Proxy) serveBytes(w http.ResponseWriter, r *http.Request, s *Stream, ra
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		http.Error(w, resp.Status, resp.StatusCode)
+		return
+	}
+	if r.Method == http.MethodHead {
+		copyHeader(w, resp, "Content-Type")
+		copyHeader(w, resp, "Content-Length")
+		copyHeader(w, resp, "Content-Range")
+		copyHeader(w, resp, "Accept-Ranges")
+		w.WriteHeader(resp.StatusCode)
 		return
 	}
 
@@ -243,7 +257,11 @@ func (p *Proxy) serveKey(w http.ResponseWriter, r *http.Request, s *Stream, raw 
 }
 
 func (p *Proxy) fetch(ctx context.Context, s *Stream, raw, rng string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	return p.fetchMethod(ctx, s, raw, rng, http.MethodGet)
+}
+
+func (p *Proxy) fetchMethod(ctx context.Context, s *Stream, raw, rng, method string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, raw, nil)
 	if err != nil {
 		return nil, err
 	}
