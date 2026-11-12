@@ -38,6 +38,10 @@ func (a *app) thumbnail(it media.Item) *ui.Bitmap {
 }
 
 func (a *app) loadThumb(it media.Item) {
+	if a.thumbSem != nil {
+		a.thumbSem <- struct{}{}
+		defer func() { <-a.thumbSem }()
+	}
 	key := thumbKey(it)
 	path := thumb.Path(a.thumbDir, key)
 	switch {

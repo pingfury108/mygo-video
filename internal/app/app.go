@@ -60,6 +60,9 @@ type app struct {
 	thumbs    map[string]*ui.Bitmap
 	thumbBusy map[string]bool
 	thumbUsed map[string]time.Time
+	// thumbSem keeps ffmpeg jobs to a couple at a time, for a server that
+	// would feel dozens of them.
+	thumbSem chan struct{}
 
 	// posters are the pictures plugins give for their videos, by URL.
 	posters    map[string]*ui.Bitmap
@@ -202,6 +205,7 @@ func (a *app) start() {
 	a.thumbs = map[string]*ui.Bitmap{}
 	a.thumbBusy = map[string]bool{}
 	a.thumbUsed = map[string]time.Time{}
+	a.thumbSem = make(chan struct{}, 2)
 	a.posters = map[string]*ui.Bitmap{}
 	a.posterBusy = map[string]bool{}
 	a.posterUsed = map[string]time.Time{}
