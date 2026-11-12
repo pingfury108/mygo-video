@@ -18,10 +18,18 @@ type Data struct {
 	Progress map[string]media.Progress `json:"progress"`
 	Volume   float64                   `json:"volume"`
 	Roots    []string                  `json:"roots,omitempty"`
+	WebDAV   WebDAVConfig              `json:"webdav,omitempty"`
 	// Items is what the last scan found, shown at once on the next run
 	// while a new scan goes on.
 	Items     []media.Item `json:"items,omitempty"`
 	ScannedAt int64        `json:"scannedAt,omitempty"`
+}
+
+// WebDAVConfig is the server a WebDAV source reads.
+type WebDAVConfig struct {
+	URL  string `json:"url,omitempty"`
+	User string `json:"user,omitempty"`
+	Pass string `json:"pass,omitempty"`
 }
 
 // Store is the data in memory, written to path.
@@ -87,6 +95,21 @@ func (s *Store) Roots() []string {
 func (s *Store) SetRoots(roots []string) {
 	s.mu.Lock()
 	s.data.Roots = append([]string(nil), roots...)
+	s.mu.Unlock()
+	s.Save()
+}
+
+// WebDAV is the server the WebDAV source reads.
+func (s *Store) WebDAV() WebDAVConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.WebDAV
+}
+
+// SetWebDAV keeps the WebDAV server.
+func (s *Store) SetWebDAV(cfg WebDAVConfig) {
+	s.mu.Lock()
+	s.data.WebDAV = cfg
 	s.mu.Unlock()
 	s.Save()
 }

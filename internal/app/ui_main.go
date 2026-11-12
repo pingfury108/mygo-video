@@ -171,7 +171,7 @@ func (a *app) stepButton(c *ui.Context, icon *ui.SVG, label string, enabled bool
 func (a *app) sourceSwitcher(c *ui.Context) {
 	p := colors()
 	name := a.sourceName()
-	if a.source == 0 && a.lib.Scanning() {
+	if a.source == sourceLocal && a.lib.Scanning() {
 		name = "正在扫描…"
 	}
 	count := len(a.items())
@@ -207,13 +207,16 @@ func (a *app) sourceSwitcher(c *ui.Context) {
 			index int
 			count int
 		}
-		sources := []choice{{name: "本地视频", count: a.lib.Count()}}
+		sources := []choice{
+			{name: "本地视频", count: a.lib.Count()},
+			{name: "WebDAV", index: sourceWebDAV, count: len(a.webdavVideos)},
+		}
 		for i, pl := range a.plugins {
 			n := 0
-			if a.source == i+1 {
+			if a.source == i+2 {
 				n = len(a.pluginItems)
 			}
-			sources = append(sources, choice{name: pl.Info().Name, index: i + 1, count: n})
+			sources = append(sources, choice{name: pl.Info().Name, index: i + 2, count: n})
 		}
 		for _, src := range sources {
 			index := src.index
@@ -299,20 +302,29 @@ func (a *app) recentItems(n int) []media.Item {
 }
 
 func (a *app) sourceLine() string {
-	if a.source != 0 {
-		return fmt.Sprintf("%s · %d 个", a.sourceName(), len(a.pluginItems))
+	switch a.source {
+	case sourceWebDAV:
+		if a.webdav == nil {
+			return "WebDAV · 未配置"
+		}
+		if a.webdavBusy {
+			return "WebDAV · 正在载入…"
+		}
+		return fmt.Sprintf("WebDAV · %d 个", len(a.webdavVideos))
+	case sourceLocal:
+		if a.lib == nil {
+			return "本地视频"
+		}
+		if a.lib.Scanning() {
+			return "正在扫描…"
+		}
+		return fmt.Sprintf("本地视频 · %d 个", a.lib.Count())
 	}
-	if a.lib == nil {
-		return "本地视频"
-	}
-	if a.lib.Scanning() {
-		return "正在扫描…"
-	}
-	return fmt.Sprintf("本地视频 · %d 个", a.lib.Count())
+	return fmt.Sprintf("%s · %d 个", a.sourceName(), len(a.pluginItems))
 }
 
 func (a *app) libraryLine() string {
-	if a.source != 0 {
+	if a.source != sourceLocal {
 		return a.sourceLine()
 	}
 	if a.lib == nil {

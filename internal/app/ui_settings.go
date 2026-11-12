@@ -39,6 +39,26 @@ func (a *app) settingsPage(c *ui.Context) {
 				})
 			})
 
+			settingsCard(c, "内置源", func() {
+				ui.Text(c, "WebDAV").FontSize(12.5).FontWeight(600)
+				ui.Text(c, "填服务器地址（含路径）、用户名和密码。保存后侧栏底部就能切到 WebDAV。").
+					FontSize(11.5).TextColor(p.faint)
+				settingsField(c, "地址", &a.webdavURL, "https://nas.local:5005/dav")
+				settingsField(c, "用户名", &a.webdavUser, "可留空")
+				settingsField(c, "密码", &a.webdavPass, "可留空")
+				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+					ghostButton(c, "保存 WebDAV", iconCheck, a.saveWebDAV)
+					switch {
+					case a.webdav != nil:
+						ui.Text(c, "已配置").FontSize(11).TextColor(p.faint)
+					case a.webdavErr != "":
+						ui.Text(c, a.webdavErr).FontSize(11).TextColor(ui.Hex("#ef8f7a"))
+					default:
+						ui.Text(c, "未配置").FontSize(11).TextColor(p.faint)
+					}
+				})
+			})
+
 			settingsCard(c, "插件", func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
 					ui.Text(c, "插件把更多来源接进来：本地网络、网盘，以及视频站点。").
@@ -82,6 +102,14 @@ func settingsCard(c *ui.Context, title string, body func()) {
 		Background(p.panel).Border(1, p.hairline).Children(func() {
 		ui.Text(c, title).FontSize(13.5).FontWeight(600)
 		body()
+	})
+}
+
+func settingsField(c *ui.Context, label string, value *string, placeholder string) {
+	p := colors()
+	ui.Column(c).Gap(4).Children(func() {
+		ui.Text(c, label).FontSize(11.5).TextColor(p.muted)
+		ui.TextInput(c, value).Placeholder(placeholder).Height(32).MaxWidth(460)
 	})
 }
 

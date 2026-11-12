@@ -113,7 +113,23 @@ func (a *app) detailPage(c *ui.Context) {
 					label = "信息"
 				}
 				ui.Text(c, label).FontSize(13).FontWeight(600).PaddingY(4)
-				if it.Source != "" {
+				switch it.Source {
+				case "webdav":
+					fact(c, "来源", "WebDAV")
+					fact(c, "大小", media.HumanSize(it.Size))
+					fact(c, "位置", it.RemoteID)
+					if !it.ModTime.IsZero() {
+						fact(c, "修改", it.ModTime.Format("2006-01-02 15:04"))
+					}
+				case "":
+					fact(c, "格式", it.Ext)
+					fact(c, "大小", media.HumanSize(it.Size))
+					fact(c, "位置", it.Path)
+					fact(c, "修改", it.ModTime.Format("2006-01-02 15:04"))
+					if it.Ext != ".mp4" && it.Ext != ".mov" && it.Ext != ".m4v" {
+						fact(c, "格式提示", "这个容器依赖系统解码器；如果打不开，可以转成 MP4。")
+					}
+				default:
 					fact(c, "来源", a.sourceName())
 					if it.Duration > 0 {
 						fact(c, "时长", media.HumanDuration(it.Duration))
@@ -124,14 +140,6 @@ func (a *app) detailPage(c *ui.Context) {
 					if it.Overview != "" {
 						ui.Text(c, it.Overview).FontSize(12).TextColor(p.muted).
 							PaddingY(6)
-					}
-				} else {
-					fact(c, "格式", it.Ext)
-					fact(c, "大小", media.HumanSize(it.Size))
-					fact(c, "位置", it.Path)
-					fact(c, "修改", it.ModTime.Format("2006-01-02 15:04"))
-					if it.Ext != ".mp4" && it.Ext != ".mov" && it.Ext != ".m4v" {
-						fact(c, "格式提示", "这个容器依赖系统解码器；如果打不开，可以转成 MP4。")
 					}
 				}
 			})

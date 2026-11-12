@@ -15,6 +15,7 @@ import (
 	"mygo-video/internal/media"
 	"mygo-video/internal/plugin"
 	"mygo-video/internal/store"
+	"mygo-video/internal/webdav"
 )
 
 // TestShots renders the pages without a window, as fast as a unit test, and
@@ -153,7 +154,7 @@ func TestPluginShots(t *testing.T) {
 	}
 	a := shotApp(t)
 	a.plugins = []*plugin.Plugin{loadTestPlugin(t)}
-	a.source = 1
+	a.source = 2
 	v := media.Video{
 		ID:       "v1",
 		Name:     "BipBop",
@@ -225,4 +226,49 @@ export function play(){return {url:"https://example.com/x.m3u8",type:"hls"}}`
 		t.Fatal(err)
 	}
 	return p
+}
+
+// TestWebDAVShots renders the WebDAV source with a folder and two videos,
+// as a server would have listed them.
+func TestWebDAVShots(t *testing.T) {
+	dir := os.Getenv("SHOTS")
+	if dir == "" {
+		t.Skip("SHOTS is not set")
+	}
+	a := shotApp(t)
+	c, err := webdav.New(webdav.Config{URL: "http://127.0.0.1:1/dav"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.webdav = c
+	a.webdavURL = "http://127.0.0.1:1/dav"
+	a.source = sourceWebDAV
+	a.webdavLoaded = ""
+	a.webdavEntries = []webdav.Entry{
+		{Path: "Movies", Name: "Movies", Dir: true},
+		{Path: "Shows", Name: "Shows", Dir: true},
+	}
+	a.webdavVideos = a.webdavItemsFrom([]webdav.Entry{
+		{Path: "Movies/Heat (1995).mkv", Name: "Heat (1995).mkv", Size: 8_000_000_000},
+		{Path: "Movies/Dune.mkv", Name: "Dune.mkv", Size: 6_000_000_000},
+	})
+	tt := ui.NewTester(a.view, 1180, 780)
+	shoot := func(name string) {
+		t.Helper()
+		tt.Frame()
+		tt.Frame()
+		f, err := os.Create(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := png.Encode(f, tt.Image()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.route = pageHome
+	shoot("14-webdav-home.png")
+	a.current = a.webdavVideos[0]
+	a.route = pageDetail
+	shoot("15-webdav-detail.png")
 }

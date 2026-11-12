@@ -171,18 +171,18 @@ var junk = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|4k|8k|uhd|bluray|blu
 
 var seriesPattern = regexp.MustCompile(`(?i)(.+?)[\s._-]+s(\d{1,2})[\s._-]*e(\d{1,3})`)
 
-func itemFor(path, root, ext string, info fs.FileInfo) media.Item {
-	name := cleanName(filepath.Base(path))
-	season, episode := 0, 0
-	var title string
+// ParseName reads a file name: its title, and the season and episode it
+// says, as "Fog Harbour S02E05".
+func ParseName(base string) (title string, season, episode int) {
+	name := cleanName(base)
 	if m := seriesPattern.FindStringSubmatch(name); m != nil {
-		title = strings.TrimSpace(m[1])
-		season = atoi(m[2])
-		episode = atoi(m[3])
+		return strings.TrimSpace(m[1]), atoi(m[2]), atoi(m[3])
 	}
-	if title == "" {
-		title = name
-	}
+	return name, 0, 0
+}
+
+func itemFor(path, root, ext string, info fs.FileInfo) media.Item {
+	title, season, episode := ParseName(filepath.Base(path))
 	series := ""
 	if season != 0 || episode != 0 {
 		series = title

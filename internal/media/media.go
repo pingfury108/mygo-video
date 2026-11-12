@@ -43,6 +43,19 @@ func (it Item) EpisodeLabel() string {
 
 // Subtitle is what a row shows under the name.
 func (it Item) Subtitle() string {
+	if it.Source == "webdav" {
+		var parts []string
+		if it.Ext != "" {
+			parts = append(parts, strings.ToUpper(strings.TrimPrefix(it.Ext, ".")))
+		}
+		if it.Size > 0 {
+			parts = append(parts, HumanSize(it.Size))
+		}
+		if len(parts) == 0 {
+			return "视频"
+		}
+		return strings.Join(parts, " · ")
+	}
 	if it.Source != "" {
 		var parts []string
 		if it.Series != "" {

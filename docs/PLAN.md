@@ -356,7 +356,7 @@ type Playback struct {
 | M2 插件宿主 | manifest、moejs 运行时、host API、能力协商、设置/安装 | demo 插件可搜索并播放一条 HLS | 完成：宿主、文件夹/zip/GitHub 安装、设置、账号、海报 |
 | M3 代理与 HLS | streamproxy、header 注入、m3u8 重写、AES-128、Range | 带 Referer 的 HLS 能播、能拖 | 代理层完成，含明文 HLS / AES-128 / MP4 Range 测试；真实播放待 M2 接入 |
 | M4 体验 | 弹幕、剧集连播、画质切换、迷你窗、托盘/媒体键 | 弹幕可开关调速；连播正常 | 剧集连播与选集已完成；弹幕/画质/迷你窗未做 |
-| M5 平台适配 | 腾讯/优酷 L2（搜索/详情/深链/内嵌 WebView）、WebDAV/Jellyfin/IPTV | 能搜到、能记录进度、能唤起播放 | 未开始 |
+| M5 平台适配 | 腾讯/优酷 L2（搜索/详情/深链/内嵌 WebView）、WebDAV/Jellyfin/IPTV | 能搜到、能记录进度、能唤起播放 | WebDAV 内置源完成；IPTV、腾讯/优酷、B 站未做 |
 | M6 发布 | 签名/公证/更新、插件安装页、文档 | 三平台安装包 | 未开始 |
 
 ---

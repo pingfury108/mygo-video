@@ -18,14 +18,18 @@ func (a *app) libraryPage(c *ui.Context) {
 		ui.Text(c, "片库").FontSize(15).FontWeight(600)
 		ui.Text(c, a.libraryLine()).FontSize(12).TextColor(p.faint)
 		ui.Box(c).Grow(1)
-		if a.source == 0 {
+		if a.source == sourceLocal {
 			iconButton(c, iconRefresh, 16, "重新扫描", func() { go a.scan() })
 		}
 	})
 
 	if len(items) == 0 {
 		ui.Column(c).Grow(1).Children(func() {
-			if a.source != 0 {
+			if a.source == sourceWebDAV {
+				emptyState(c, "WebDAV 还没有东西", "在设置里检查地址、账号，或在首页先打开一个文件夹。", nil)
+				return
+			}
+			if a.source >= 2 {
 				emptyState(c, "这个来源还没有内容", "", nil)
 				return
 			}
@@ -55,7 +59,10 @@ func (a *app) searchPage(c *ui.Context) {
 
 	ui.Column(c).Grow(1).PaddingX(32).Gap(16).Children(func() {
 		placeholder := "搜索文件名、剧名或 S02E05"
-		if a.source != 0 {
+		switch {
+		case a.source == sourceWebDAV:
+			placeholder = "搜索这个文件夹里的文件名"
+		case a.source >= 2:
 			placeholder = "搜索这个来源里的剧集"
 		}
 		ui.Row(c).Children(func() {
@@ -99,7 +106,7 @@ func (a *app) searchPage(c *ui.Context) {
 // searchPlugin asks the source being shown, off the main thread, once for
 // each query.
 func (a *app) searchPlugin() {
-	if a.source == 0 || a.searchBusy {
+	if a.source < 2 || a.searchBusy {
 		return
 	}
 	q := strings.TrimSpace(a.query)
@@ -111,7 +118,7 @@ func (a *app) searchPlugin() {
 	if q == a.searchQuery {
 		return
 	}
-	p := a.plugins[a.source-1]
+	p := a.plugins[a.source-2]
 	id := p.Info().ID
 	a.searchQuery = q
 	a.searchBusy = true
@@ -119,7 +126,7 @@ func (a *app) searchPlugin() {
 		r, err := p.Search(q, 0)
 		mygo.RunOnMain(func() {
 			a.searchBusy = false
-			if a.source == 0 || a.plugins[a.source-1].Info().ID != id {
+			if a.source < 2 || a.plugins[a.source-2].Info().ID != id {
 				return
 			}
 			a.pluginSearch = nil
@@ -137,10 +144,24 @@ func (a *app) searchPlugin() {
 }
 
 func (a *app) searchResults() []media.Item {
-	if a.source != 0 {
+	switch {
+	case a.source == sourceWebDAV:
+		q := strings.ToLower(strings.TrimSpace(a.query))
+		if q == "" {
+			return nil
+		}
+		var out []media.Item
+		for _, it := range a.webdavVideos {
+			if strings.Contains(strings.ToLower(it.Name), q) {
+				out = append(out, it)
+			}
+		}
+		return out
+	case a.source >= 2:
 		return a.pluginSearch
+	default:
+		return a.results()
 	}
-	return a.results()
 }
 
 func (a *app) results() []media.Item {

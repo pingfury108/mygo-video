@@ -41,6 +41,7 @@ go tool mygo build    # 打包到 build/
 ## 现在能做什么
 
 - 本地视频库：扫描文件夹，按修改时间排序，识别 `S02E05` 这样的集数
+- 内置 WebDAV：设置里填地址和账号，浏览服务器文件夹，播放视频
 - 插件源：数据目录 `plugins/` 下的 JS/TS 插件，接入后出现在侧栏底部的源列表里；播放走本机代理
 - 封面：用本机 `ffmpeg` 从视频 10 秒处抽帧，640×360 JPEG 缓存在数据目录；列表、详情海报、首页 hero 都用它，没有 ffmpeg 时回退到首字色块
 - 首页：继续观看（全宽 hero）、最近添加
@@ -91,6 +92,14 @@ go tool mygo build    # 打包到 build/
 - **账号**：`登录` / `退出`，调插件的 `signIn` / `signOut` / `account`
 - **海报**：从 `poster` 字段加载网络图片，受 `permissions.network` 限制
 
+## 内置源
+
+WebDAV：设置 → 内置源，填地址（含路径，如 `https://nas.local:5005/dav`）、用户名和密码。保存后侧栏底部出现「WebDAV」，可以：
+
+- 浏览文件夹，面包屑返回上级
+- 播放里面的视频，走本机代理带上 Basic Auth
+- 进度存在本地，和本地视频一样续播
+
 ## 结构
 
 ```
@@ -104,6 +113,7 @@ internal/
   subtitle/     SRT / VTT 解析
   thumb/        ffmpeg 抽帧，缩略图缓存
   streamproxy/  本机代理：请求头注入、HLS 重写、AES-128 解密
+  webdav/       WebDAV 客户端：PROPFIND、Basic Auth
 examples/
   demo-plugin/  一个公开 HLS 测试流的插件
 docs/

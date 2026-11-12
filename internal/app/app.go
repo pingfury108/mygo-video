@@ -19,9 +19,17 @@ import (
 	"mygo-video/internal/streamproxy"
 	"mygo-video/internal/subtitle"
 	"mygo-video/internal/thumb"
+	"mygo-video/internal/webdav"
 )
 
 const appName = "MyGo Video"
+
+// The sources that come before the plugins: the library on this computer,
+// and the WebDAV server it reads.
+const (
+	sourceLocal  = 0
+	sourceWebDAV = 1
+)
 
 // processStart is when the app's code began, before main: the mark of a dev
 // run that says where startup spends its time.
@@ -99,6 +107,20 @@ type app struct {
 	pluginBusy   bool
 	searchQuery  string
 	searchBusy   bool
+
+	// The built-in WebDAV source: the server, what it listed, and where the
+	// pages are.
+	webdav        *webdav.Client
+	webdavURL     string
+	webdavUser    string
+	webdavPass    string
+	webdavPath    string
+	webdavLoaded  string
+	webdavEntries []webdav.Entry
+	webdavVideos  []media.Item
+	webdavBusy    bool
+	webdavErr     string
+	webdavScroll  ui.ScrollState
 
 	// history and forward are the pages gone back from and forward to,
 	// for the sidebar's arrows.
@@ -185,6 +207,7 @@ func (a *app) start() {
 	a.pluginDataDir = filepath.Join(dir, "plugin-data")
 	_ = os.MkdirAll(a.pluginsDir, 0o700)
 	a.plugins = plugin.Discover(a.pluginsDir, a.pluginDataDir)
+	a.makeWebDAV()
 	// What the last run found shows at once, while the new scan goes on.
 	if cached := st.Items(); len(cached) > 0 {
 		var at time.Time
@@ -327,18 +350,28 @@ func (a *app) openDetail(it media.Item) {
 
 // items is what the source being shown lists.
 func (a *app) items() []media.Item {
-	if a.source == 0 {
+	switch a.source {
+	case sourceLocal:
 		return a.lib.Items()
+	case sourceWebDAV:
+		return a.webdavVideos
+	default:
+		return a.pluginItems
 	}
-	return a.pluginItems
 }
 
 // sourceName is the source being shown.
 func (a *app) sourceName() string {
-	if a.source == 0 || a.source > len(a.plugins) {
+	switch a.source {
+	case sourceLocal:
 		return "本地视频"
+	case sourceWebDAV:
+		return "WebDAV"
 	}
-	return a.plugins[a.source-1].Info().Name
+	if i := a.source - 2; i >= 0 && i < len(a.plugins) {
+		return a.plugins[i].Info().Name
+	}
+	return "本地视频"
 }
 
 func (a *app) pluginByID(id string) *plugin.Plugin {
@@ -352,7 +385,7 @@ func (a *app) pluginByID(id string) *plugin.Plugin {
 
 // switchSource shows another source and forgets what the last one listed.
 func (a *app) switchSource(i int) {
-	if i < 0 || i > len(a.plugins) || i == a.source {
+	if i < 0 || i > len(a.plugins)+1 || i == a.source {
 		return
 	}
 	a.source = i
@@ -362,23 +395,30 @@ func (a *app) switchSource(i int) {
 	a.pluginSearch = nil
 	a.pluginErr = ""
 	a.searchQuery = ""
+	if i == sourceWebDAV {
+		a.webdavPath = ""
+		a.webdavLoaded = ""
+		a.webdavEntries = nil
+		a.webdavVideos = nil
+		a.webdavErr = ""
+	}
 	a.route = pageHome
 	a.invalidate()
 }
 
 // loadPluginHome asks the source being shown for its home page, once.
 func (a *app) loadPluginHome() {
-	if a.source == 0 || a.pluginBusy || a.pluginBrowse != nil {
+	if a.source < 2 || a.pluginBusy || a.pluginBrowse != nil {
 		return
 	}
-	p := a.plugins[a.source-1]
+	p := a.plugins[a.source-2]
 	id := p.Info().ID
 	a.pluginBusy = true
 	go func() {
 		b, err := p.Home()
 		mygo.RunOnMain(func() {
 			a.pluginBusy = false
-			if a.source == 0 || a.plugins[a.source-1].Info().ID != id {
+			if a.source < 2 || a.plugins[a.source-2].Info().ID != id {
 				return
 			}
 			if err != nil {
@@ -418,7 +458,11 @@ func itemFromVideo(source string, v media.Video) media.Item {
 
 // play opens an item, from the start or where the listener stopped.
 func (a *app) play(it media.Item, fromStart bool) {
-	if it.Source != "" {
+	switch {
+	case it.Source == "webdav":
+		a.playWebDAV(it, fromStart)
+		return
+	case it.Source != "":
 		a.playPlugin(it, fromStart)
 		return
 	}

@@ -16,12 +16,16 @@ func (a *app) homePage(c *ui.Context) {
 		ui.Text(c, a.sourceName()).FontSize(12).TextColor(p.faint)
 		ui.Box(c).Grow(1)
 		iconButton(c, iconSearch, 16, "搜索", func() { a.goPage(pageSearch) })
-		if a.source == 0 {
+		if a.source == sourceLocal {
 			iconButton(c, iconRefresh, 16, "重新扫描", func() { go a.scan() })
 		}
 	})
 
-	if a.source != 0 {
+	switch {
+	case a.source == sourceWebDAV:
+		a.webdavHome(c)
+		return
+	case a.source >= 2:
 		a.pluginHome(c)
 		return
 	}
@@ -91,7 +95,7 @@ func (a *app) pluginHome(c *ui.Context) {
 		})
 		return
 	}
-	id := a.plugins[a.source-1].Info().ID
+	id := a.plugins[a.source-2].Info().ID
 	ui.Scroll(c).Grow(1).TrackScroll(&a.homeScroll).Children(func() {
 		ui.Column(c).Padding(8, 32, 40, 32).Gap(26).Children(func() {
 			if len(b.Sections) == 0 {
