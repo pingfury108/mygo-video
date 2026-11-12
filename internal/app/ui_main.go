@@ -16,11 +16,15 @@ func (a *app) view(c *ui.Context) {
 		a.focusSearch = true
 		a.goPage(pageSearch)
 	})
-	if a.route == pagePlayer && a.player != nil {
-		a.playerPage(c)
-		return
-	}
 	if a.route == pagePlayer {
+		if a.player != nil {
+			a.playerPage(c)
+			return
+		}
+		if a.playOpening {
+			a.preparingPage(c)
+			return
+		}
 		a.route = pageDetail
 	}
 	bar := c.TitleBar()

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -126,6 +127,8 @@ type app struct {
 	webdavBusy      bool
 	webdavErr       string
 	webdavScroll    ui.ScrollState
+	webdavDirs      map[string]webdavDir
+	webdavIndexAt   time.Time
 
 	// The scan of every folder below the one showing.
 	webdavAll      bool
@@ -134,6 +137,14 @@ type app struct {
 	webdavFound    int
 	webdavAllItems []media.Item
 	webdavGen      int32
+
+	// A WebDAV video being fetched to this computer before it plays.
+	webdavPlayItem    media.Item
+	webdavPlayStart   bool
+	webdavDownloading bool
+	webdavProgress    float64
+	webdavCancel      context.CancelFunc
+	playOpening       bool
 
 	// history and forward are the pages gone back from and forward to,
 	// for the sidebar's arrows.
@@ -213,6 +224,7 @@ func (a *app) start() {
 	a.pluginAccounts = map[string]*plugin.Account{}
 	a.pluginAccountBusy = map[string]bool{}
 	a.pluginChecked = map[string]bool{}
+	a.webdavDirs = map[string]webdavDir{}
 
 	a.proxy, _ = streamproxy.New()
 	plugin.SetOpenURL(mygo.Shell.OpenExternal)
@@ -413,11 +425,8 @@ func (a *app) switchSource(i int) {
 		a.webdavPath = ""
 		a.webdavLoaded = ""
 		a.webdavHasLoaded = false
-		a.webdavEntries = nil
-		a.webdavVideos = nil
 		a.webdavErr = ""
 		a.webdavAll = false
-		a.webdavAllItems = nil
 		a.webdavScanning = false
 		atomic.AddInt32(&a.webdavGen, 1)
 	}

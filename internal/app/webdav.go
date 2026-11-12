@@ -10,15 +10,14 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/video"
 
 	"mygo-video/internal/local"
 	"mygo-video/internal/media"
 	"mygo-video/internal/store"
-	"mygo-video/internal/streamproxy"
 	"mygo-video/internal/webdav"
 )
 
@@ -31,6 +30,9 @@ func (a *app) makeWebDAV() {
 	a.webdavHasLoaded = false
 	a.webdavEntries, a.webdavVideos = nil, nil
 	a.webdavErr = ""
+	a.webdavDirs = map[string]webdavDir{}
+	a.webdavIndexAt = time.Time{}
+	a.webdavAllItems = nil
 	if strings.TrimSpace(cfg.URL) == "" {
 		return
 	}
@@ -40,6 +42,7 @@ func (a *app) makeWebDAV() {
 		return
 	}
 	a.webdav = c
+	a.loadWebDAVCache()
 }
 
 // saveWebDAV keeps what the settings page says and lists it again.
@@ -68,19 +71,31 @@ func (a *app) openWebDAVPath(p string) {
 	a.webdavPath = p
 	a.webdavLoaded = ""
 	a.webdavHasLoaded = false
-	a.webdavEntries = nil
-	a.webdavVideos = nil
 	a.webdavErr = ""
 	a.webdavScroll = ui.ScrollState{}
 	a.invalidate()
 }
 
 // loadWebDAV lists the folder showing, once.
+// loadWebDAV lists the folder showing, unless what it said is fresh
+// enough: what it said last time shows at once.
 func (a *app) loadWebDAV() {
-	if a.webdav == nil || a.webdavBusy || (a.webdavHasLoaded && a.webdavLoaded == a.webdavPath) {
+	a.loadWebDAVPath(a.webdavPath, false)
+}
+
+func (a *app) loadWebDAVPath(dir string, force bool) {
+	if a.webdav == nil {
 		return
 	}
-	dir := a.webdavPath
+	if cached, ok := a.webdavDirs[dir]; ok {
+		a.applyWebDAVDir(dir, cached.Entries, false)
+		if !force && time.Since(time.UnixMilli(cached.At)) < webdavDirTTL {
+			return
+		}
+	}
+	if a.webdavBusy {
+		return
+	}
 	a.webdavBusy = true
 	a.webdavErr = ""
 	go func() {
@@ -90,15 +105,14 @@ func (a *app) loadWebDAV() {
 			if a.webdavPath != dir {
 				return
 			}
-			a.webdavLoaded = dir
-			a.webdavHasLoaded = true
 			if err != nil {
 				a.webdavErr = err.Error()
 				a.invalidate()
 				return
 			}
-			a.webdavEntries = entries
-			a.webdavVideos = a.webdavItemsFrom(entries)
+			a.webdavDirs[dir] = webdavDir{At: time.Now().UnixMilli(), Entries: entries}
+			a.applyWebDAVDir(dir, entries, true)
+			a.saveWebDAVCache()
 			a.invalidate()
 		})
 	}()
@@ -141,38 +155,6 @@ func (a *app) webdavItemsFrom(entries []webdav.Entry) []media.Item {
 
 // playWebDAV plays a file of the server through the proxy, with the
 // authorization the server asks for.
-func (a *app) playWebDAV(it media.Item, fromStart bool) {
-	a.closePlayer()
-	headers := map[string]string{}
-	if cfg := a.store.WebDAV(); cfg.User != "" || cfg.Pass != "" {
-		headers["Authorization"] = "Basic " +
-			base64.StdEncoding.EncodeToString([]byte(cfg.User+":"+cfg.Pass))
-	}
-	kind := "mp4"
-	if strings.HasSuffix(strings.ToLower(it.RemoteID), ".m3u8") {
-		kind = "hls"
-	}
-	url, token, err := a.proxy.Open(streamproxy.Stream{
-		URL:     it.RemoteID,
-		Type:    kind,
-		Headers: headers,
-	})
-	if err != nil {
-		a.say("%v", err)
-		return
-	}
-	player, err := video.OpenURL(url)
-	if err != nil {
-		a.proxy.Forget(token)
-		a.say("%v", err)
-		return
-	}
-	a.proxyToken = token
-	a.subs = nil
-	a.subsOn = false
-	a.beginPlayback(it, player, fromStart)
-}
-
 // webdavHome is the WebDAV source's page: the folders of where it is, and
 // the videos there.
 func (a *app) webdavHome(c *ui.Context) {
@@ -226,9 +208,9 @@ func (a *app) webdavHome(c *ui.Context) {
 				}
 				ui.Text(c, name).FontSize(12).TextColor(p.muted).SingleLine()
 				ui.Box(c).Grow(1)
-				ghostButton(c, "全部视频", iconSearch, a.scanWebDAVAll)
+				ghostButton(c, "全部视频", iconSearch, a.showWebDAVAll)
 				iconButton(c, iconRefresh, 15, "刷新", func() {
-					a.openWebDAVPath(a.webdavPath)
+					a.loadWebDAVPath(a.webdavPath, true)
 				})
 			})
 
@@ -279,6 +261,31 @@ func parentPath(p string) string {
 	return ""
 }
 
+// showWebDAVAll shows every video kept from the last walk, and walks again
+// in the background once that is old.
+func (a *app) showWebDAVAll() {
+	a.webdavAll = true
+	if len(a.webdavAllItems) == 0 || time.Since(a.webdavIndexAt) > webdavIndexTTL {
+		a.scanWebDAVAll()
+	}
+	a.invalidate()
+}
+
+// ago says how long it has been, as a line reads.
+func ago(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "刚刚"
+	case d < time.Hour:
+		return fmt.Sprintf("%d 分钟前", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%d 小时前", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%d 天前", int(d.Hours()/24))
+	}
+}
+
 func (a *app) webdavAuth() map[string]string {
 	cfg := a.store.WebDAV()
 	if cfg.User == "" && cfg.Pass == "" {
@@ -308,6 +315,9 @@ func (a *app) webdavAllView(c *ui.Context) {
 		} else {
 			ui.Text(c, fmt.Sprintf("%d 个", len(a.webdavAllItems))).FontSize(11).TextColor(p.faint)
 			ghostButton(c, "重新扫描", iconRefresh, a.scanWebDAVAll)
+			if !a.webdavIndexAt.IsZero() {
+				ui.Text(c, "上次扫描 "+ago(a.webdavIndexAt)).FontSize(10.5).TextColor(p.faint)
+			}
 		}
 		ui.Box(c).Grow(1)
 		ghostButton(c, "返回文件夹", iconBack, func() {
@@ -336,7 +346,6 @@ func (a *app) scanWebDAVAll() {
 	}
 	a.webdavScanning = true
 	a.webdavAll = true
-	a.webdavAllItems = nil
 	a.webdavScanned = 0
 	a.webdavFound = 0
 	gen := atomic.AddInt32(&a.webdavGen, 1)
@@ -391,6 +400,8 @@ func (a *app) scanWebDAVAll() {
 			a.webdavScanned = dirs
 			a.webdavAllItems = items
 			a.webdavFound = len(items)
+			a.webdavIndexAt = time.Now()
+			a.saveWebDAVCache()
 			a.invalidate()
 		})
 	}()
