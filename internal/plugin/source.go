@@ -48,7 +48,7 @@ func (p *Plugin) Play(id, quality string) (*media.Playback, error) {
 	if pb.DRM != "" {
 		return &pb, ErrDRM
 	}
-	if pb.URL == "" && pb.Open == "" {
+	if pb.URL == "" && pb.Open == "" && (pb.Dash == nil || pb.Dash.Video == "") {
 		return nil, ErrUnavailable
 	}
 	return &pb, nil

@@ -196,6 +196,10 @@ type app struct {
 	fresh    bool
 	ended    bool
 
+	// quality is what to ask a plugin for, and playingQuality what it gave.
+	quality        string
+	playingQuality string
+
 	// The pointer over the video, for the controls to come back at the
 	// window's edges.
 	pointerX, pointerY float32
@@ -623,7 +627,7 @@ func (a *app) playPlugin(it media.Item, fromStart bool) {
 		return
 	}
 	go func() {
-		pb, err := p.Play(it.RemoteID, "")
+		pb, err := p.Play(it.RemoteID, a.quality)
 		mygo.RunOnMain(func() { a.openPlayback(it, pb, err, fromStart) })
 	}()
 }
@@ -652,14 +656,21 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 		a.say("已在浏览器打开")
 		return
 	}
-	if p := a.pluginByID(it.Source); p != nil && !p.AllowsHost(pb.URL) {
-		a.say("这个来源没有访问该地址的权限")
-		return
+	videoURL, audio, kind := pb.URL, "", pb.Type
+	if pb.Dash != nil && pb.Dash.Video != "" {
+		videoURL, audio, kind = pb.Dash.Video, pb.Dash.Audio, "dash"
+	}
+	if p := a.pluginByID(it.Source); p != nil {
+		if !p.AllowsHost(videoURL) || (audio != "" && !p.AllowsHost(audio)) {
+			a.say("这个来源没有访问该地址的权限")
+			return
+		}
 	}
 	a.closePlayer()
 	url, token, err := a.proxy.Open(streamproxy.Stream{
-		URL:     pb.URL,
-		Type:    pb.Type,
+		URL:     videoURL,
+		Type:    kind,
+		Audio:   audio,
 		Headers: pb.Headers,
 	})
 	if err != nil {
@@ -676,6 +687,7 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 	a.subs = nil
 	a.subsOn = false
 	a.beginPlayback(it, player, fromStart)
+	a.playingQuality = pb.Quality
 }
 
 // beginPlayback makes p the video showing, from where the listener stopped
@@ -689,6 +701,7 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	}
 	a.player = p
 	a.playing = it
+	a.playingQuality = ""
 	a.fresh = fromStart
 	a.route = pagePlayer
 	a.rate = a.store.Rate()

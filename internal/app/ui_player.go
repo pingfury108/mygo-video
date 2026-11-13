@@ -184,6 +184,17 @@ func (a *app) playerControls(c *ui.Context) {
 			rate.Children(func() {
 				ui.Text(c, rateLabel(a.rate)).FontSize(11).FontWeight(600)
 			})
+			if a.pluginQualitySource() {
+				q := ui.ButtonBase(c).Height(30).PaddingX(8).Radius(7).Label("清晰度").FocusRing(false)
+				q.TextColor(ui.RGBA(255, 255, 255, 0.82))
+				if q.Hovered() {
+					q.Background(ui.RGBA(255, 255, 255, 0.12))
+				}
+				q.OnClick(a.cycleQuality)
+				q.Children(func() {
+					ui.Text(c, a.qualityLabel()).FontSize(11).FontWeight(600)
+				})
+			}
 			if len(eps) > 0 {
 				playerButton(c, iconEpisodes, 17, "选集", a.drawer, func() {
 					a.drawer = !a.drawer
@@ -419,6 +430,41 @@ func (a *app) toggleSubtitles() {
 		return
 	}
 	a.subsOn = !a.subsOn
+	a.uiShown = time.Now()
+	a.invalidate()
+}
+
+// pluginQualitySource says the video comes from a plugin, which may pick
+// its quality.
+func (a *app) pluginQualitySource() bool {
+	s := a.playing.Source
+	return s != "" && s != "webdav" && s != "iptv"
+}
+
+// qualityLabel is what the stream plays at, or what it will ask for.
+func (a *app) qualityLabel() string {
+	if a.playingQuality != "" {
+		return a.playingQuality
+	}
+	if a.quality != "" {
+		return a.quality + "P"
+	}
+	return "自动"
+}
+
+// cycleQuality asks for the next quality, and plays the video again.
+func (a *app) cycleQuality() {
+	switch a.quality {
+	case "":
+		a.quality = "1080"
+	case "1080":
+		a.quality = "720"
+	default:
+		a.quality = ""
+	}
+	if a.pluginQualitySource() {
+		a.play(a.playing, false)
+	}
 	a.uiShown = time.Now()
 	a.invalidate()
 }

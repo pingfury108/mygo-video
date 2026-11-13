@@ -50,6 +50,9 @@ type Stream struct {
 	// Start is where the stream begins, for a seek that restarts the
 	// remux at the place asked for.
 	Start time.Duration
+	// Audio is where the sound of a stream kept apart comes from, as DASH
+	// does; the remux joins it to the picture.
+	Audio string
 
 	// hls is the remux running for this stream, if any.
 	hls *hlsJob
@@ -132,6 +135,20 @@ func (p *Proxy) Open(s Stream) (string, string, error) {
 	// An MP4 with its moov at the end can't be streamed by the system's
 	// player over HTTP: it waits for the whole file. Remux it to HLS as it
 	// comes, which the player begins on at once.
+	if s.Audio != "" || s.Type == "dash" {
+		if s.FFmpeg == "" {
+			return "", "", errors.New("streamproxy: a dash stream needs ffmpeg")
+		}
+		job, err := p.startHLS(&s)
+		if err != nil {
+			return "", "", err
+		}
+		s.hls = job
+		p.mu.Lock()
+		p.streams[token] = &s
+		p.mu.Unlock()
+		return p.base + "/s/" + token + "/hls/index.m3u8", token, nil
+	}
 	if s.Type == "mp4" && s.FFmpeg != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		fast := p.isFaststart(ctx, &s, s.URL)
@@ -373,14 +390,22 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		return nil, err
 	}
 	args := []string{"-loglevel", "error", "-rw_timeout", "15000000"}
-	if h := headerLines(s.Headers); h != "" {
-		args = append(args, "-headers", h)
-	}
 	if s.Start > 0 {
 		args = append(args, "-ss", fmt.Sprintf("%.3f", s.Start.Seconds()))
 	}
+	// Each input takes the headers of its own request.
+	addInput := func(u string) {
+		if h := headerLines(s.Headers); h != "" {
+			args = append(args, "-headers", h)
+		}
+		args = append(args, "-i", u)
+	}
+	addInput(s.URL)
+	if s.Audio != "" {
+		addInput(s.Audio)
+		args = append(args, "-map", "0:v:0", "-map", "1:a:0")
+	}
 	args = append(args,
-		"-i", s.URL,
 		"-c", "copy",
 		"-f", "hls",
 		"-hls_time", "4",

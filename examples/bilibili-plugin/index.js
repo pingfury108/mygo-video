@@ -128,7 +128,7 @@ export async function title({ id }) {
   };
 }
 
-export async function play({ id }) {
+export async function play({ id, quality }) {
   const raw = String(id);
   if (raw.startsWith("season:")) {
     return { open: "https://www.bilibili.com/bangumi/play/ss" + raw.slice(7) };
@@ -139,19 +139,49 @@ export async function play({ id }) {
     const d = await api("/x/web-interface/view?bvid=" + bvid);
     cid = d.cid;
   }
-  const d = await api(
-    "/x/player/playurl?bvid=" +
-      bvid +
-      "&cid=" +
-      cid +
-      "&qn=64&fnval=1&fnver=0&fourk=1&platform=html5&high_quality=1",
-  );
+  const base =
+    "/x/player/playurl?bvid=" + bvid + "&cid=" + cid + "&fnver=0&fourk=1";
+
+  // 1080P keeps picture and sound apart, as DASH does; 720P is one mp4.
+  if (quality !== "720") {
+    try {
+      const d = await api(base + "&qn=80&fnval=16");
+      const dash = d && d.dash;
+      if (dash && dash.video && dash.video.length) {
+        const v = dash.video.find((x) => x.id === 80) || dash.video[0];
+        const a = dash.audio && dash.audio[0];
+        return {
+          type: "dash",
+          dash: {
+            video: v.baseUrl || v.base_url,
+            audio: a ? a.baseUrl || a.base_url : "",
+          },
+          headers: playHeaders(),
+          quality: v.id >= 80 ? "1080P" : v.id >= 64 ? "720P" : v.id + "P",
+        };
+      }
+    } catch (e) {
+      // Fall back to the mp4 below.
+    }
+  }
+
+  const d = await api(base + "&qn=64&fnval=1&platform=html5&high_quality=1");
   const seg = d.durl && d.durl[0];
   if (!seg || !seg.url) throw new Error("没有可播放的地址");
+  return {
+    url: seg.url,
+    type: "mp4",
+    headers: playHeaders(),
+    quality: "720P",
+    duration: seg.length || 0,
+  };
+}
+
+function playHeaders() {
   const h = { Referer: REFERER, "User-Agent": UA };
   const c = cookie();
   if (c) h.Cookie = c;
-  return { url: seg.url, type: "mp4", headers: h, duration: seg.length || 0 };
+  return h;
 }
 
 export async function account() {

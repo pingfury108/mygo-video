@@ -321,3 +321,69 @@ func TestHLSRemux(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 }
+
+// A stream kept apart, as DASH has it, is joined into HLS: both the
+// picture and its sound come out.
+func TestHLSRemuxDash(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg")
+	}
+	dir := t.TempDir()
+	video := filepath.Join(dir, "v.mp4")
+	audio := filepath.Join(dir, "a.m4a")
+	mk := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(ffmpeg, append([]string{"-y", "-loglevel", "error"}, args...)...)
+		if err := cmd.Run(); err != nil {
+			t.Skipf("can't make a clip: %v", err)
+		}
+	}
+	mk("-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=25", "-c:v", "libx264", "-an", video)
+	mk("-f", "lavfi", "-i", "sine=duration=2", "-c:a", "aac", audio)
+	srv := httptest.NewServer(http.FileServer(http.Dir(dir)))
+	defer srv.Close()
+
+	p, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	u, _, err := p.Open(Stream{
+		URL:    srv.URL + "/v.mp4",
+		Audio:  srv.URL + "/a.m4a",
+		Type:   "dash",
+		FFmpeg: ffmpeg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(25 * time.Second)
+	for {
+		resp, err := http.Get(u)
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && strings.Contains(string(body), ".m4s") {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("playlist did not come")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	probe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		return
+	}
+	out, err := exec.Command(probe, "-v", "error", "-show_entries", "stream=codec_type",
+		"-of", "csv=p=0", u).Output()
+	if err != nil {
+		t.Fatalf("ffprobe: %v", err)
+	}
+	if !strings.Contains(string(out), "video") || !strings.Contains(string(out), "audio") {
+		t.Fatalf("streams: %s", out)
+	}
+}

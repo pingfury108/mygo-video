@@ -49,10 +49,14 @@ func TestBilibiliPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pb.URL == "" {
+	if pb.URL == "" && (pb.Dash == nil || pb.Dash.Video == "") {
 		t.Fatal("no play url")
 	}
-	t.Logf("play: %s %s", pb.Type, pb.URL[:min(80, len(pb.URL))])
+	if pb.Dash != nil {
+		t.Logf("play: %s %s + %s", pb.Type, pb.Quality, pb.Dash.Video[:min(70, len(pb.Dash.Video))])
+	} else {
+		t.Logf("play: %s %s %s", pb.Type, pb.Quality, pb.URL[:min(70, len(pb.URL))])
+	}
 	if acc, err := p.Account(); err == nil && acc != nil {
 		t.Logf("account: %s", acc.Name)
 	}

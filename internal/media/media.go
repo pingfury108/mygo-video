@@ -189,6 +189,16 @@ type Playback struct {
 	// DRM says the stream is protected, as "widevine", which the app can't
 	// play and doesn't try to bypass.
 	DRM string `json:"drm,omitempty"`
+	// Quality is what the source called the stream it gave, as "1080".
+	Quality string `json:"quality,omitempty"`
+	// Dash is a picture and its sound kept apart, which the proxy joins.
+	Dash *Dash `json:"dash,omitempty"`
+}
+
+// Dash is a video and its sound at two addresses of their own.
+type Dash struct {
+	Video string `json:"video"`
+	Audio string `json:"audio,omitempty"`
 }
 
 // A Setting is something a plugin asks the listener for.
