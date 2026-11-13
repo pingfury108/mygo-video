@@ -23,6 +23,8 @@ type Data struct {
 	// while a new scan goes on.
 	Items     []media.Item `json:"items,omitempty"`
 	ScannedAt int64        `json:"scannedAt,omitempty"`
+	// Source is the one last showing, so the next run opens on it.
+	Source int `json:"source,omitempty"`
 }
 
 // WebDAVConfig is the server a WebDAV source reads.
@@ -95,6 +97,21 @@ func (s *Store) Roots() []string {
 func (s *Store) SetRoots(roots []string) {
 	s.mu.Lock()
 	s.data.Roots = append([]string(nil), roots...)
+	s.mu.Unlock()
+	s.Save()
+}
+
+// Source is the source last showing.
+func (s *Store) Source() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.Source
+}
+
+// SetSource keeps the source showing.
+func (s *Store) SetSource(i int) {
+	s.mu.Lock()
+	s.data.Source = i
 	s.mu.Unlock()
 	s.Save()
 }

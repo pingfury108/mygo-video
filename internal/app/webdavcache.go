@@ -28,8 +28,6 @@ type webdavCache struct {
 	ScannedAt int64                `json:"scannedAt,omitempty"`
 	Items     []media.Item         `json:"items,omitempty"`
 	Dirs      map[string]webdavDir `json:"dirs,omitempty"`
-	// All says the source was left showing every video, not a folder.
-	All bool `json:"all,omitempty"`
 }
 
 // webdavDir is what a folder held, and when it said so.
@@ -61,7 +59,9 @@ func (a *app) loadWebDAVCache() {
 		a.webdavDirs = map[string]webdavDir{}
 	}
 	a.webdavAllItems = c.Items
-	a.webdavAll = c.All
+	// A walk kept is what the source opens on, rather than a folder nobody
+	// asked to see.
+	a.webdavAll = len(c.Items) > 0
 	if c.ScannedAt > 0 {
 		a.webdavIndexAt = time.UnixMilli(c.ScannedAt)
 	}
@@ -107,7 +107,6 @@ func (a *app) saveWebDAVCache() {
 		ScannedAt: a.webdavIndexAt.UnixMilli(),
 		Items:     a.webdavAllItems,
 		Dirs:      dirs,
-		All:       a.webdavAll,
 	}
 	b, err := json.Marshal(c)
 	if err != nil {

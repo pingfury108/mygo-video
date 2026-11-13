@@ -235,6 +235,10 @@ func (a *app) start() {
 	a.pluginDataDir = filepath.Join(dir, "plugin-data")
 	_ = os.MkdirAll(a.pluginsDir, 0o700)
 	a.plugins = plugin.Discover(a.pluginsDir, a.pluginDataDir)
+	a.source = st.Source()
+	if a.source < 0 || a.source > len(a.plugins)+1 {
+		a.source = 0
+	}
 	a.makeWebDAV()
 	// What the last run found shows at once, while the new scan goes on.
 	if cached := st.Items(); len(cached) > 0 {
@@ -429,9 +433,11 @@ func (a *app) switchSource(i int) {
 		a.webdavHasLoaded = false
 		a.webdavErr = ""
 		a.webdavScanning = false
+		a.webdavAll = len(a.webdavAllItems) > 0
 		atomic.AddInt32(&a.webdavGen, 1)
 	}
 	a.route = pageHome
+	a.store.SetSource(i)
 	a.invalidate()
 }
 
