@@ -54,6 +54,13 @@ func (a *app) playNeighbor(delta int) {
 	}
 }
 
+// playNext goes on to the next episode, if the series has one.
+func (a *app) playNext() {
+	if ep, ok := a.neighbor(a.playing, 1); ok {
+		a.play(ep, true)
+	}
+}
+
 func (a *app) selectEpisode(ep media.Item) {
 	a.current = ep
 	a.invalidate()

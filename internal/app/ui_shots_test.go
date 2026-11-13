@@ -11,6 +11,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"mygo-video/internal/iptv"
 	"mygo-video/internal/local"
 	"mygo-video/internal/media"
 	"mygo-video/internal/plugin"
@@ -303,6 +304,38 @@ func TestWebDAVAllShot(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 	f, err := os.Create(filepath.Join(dir, "16-webdav-all.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, tt.Image()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestIPTVShot renders the live source with a few channels in two groups.
+func TestIPTVShot(t *testing.T) {
+	dir := os.Getenv("SHOTS")
+	if dir == "" {
+		t.Skip("SHOTS is not set")
+	}
+	a := shotApp(t)
+	a.source = sourceIPTV
+	a.iptvURL = "https://example.com/live.m3u"
+	a.iptvLoaded = true
+	a.iptvChannels = []iptv.Channel{
+		{Name: "CCTV-1 综合", Group: "央视", URL: "http://example.com/1.m3u8"},
+		{Name: "CCTV-5 体育", Group: "央视", URL: "http://example.com/5.m3u8"},
+		{Name: "CCTV-6 电影", Group: "央视", URL: "http://example.com/6.m3u8"},
+		{Name: "湖南卫视", Group: "卫视", URL: "http://example.com/hunan.m3u8"},
+		{Name: "东方卫视", Group: "卫视", URL: "http://example.com/dongfang.m3u8"},
+		{Name: "浙江卫视", Group: "卫视", URL: "http://example.com/zhejiang.m3u8"},
+	}
+	a.iptvGroups = []string{"央视", "卫视"}
+	tt := ui.NewTester(a.view, 1180, 780)
+	tt.Frame()
+	tt.Frame()
+	f, err := os.Create(filepath.Join(dir, "17-iptv-home.png"))
 	if err != nil {
 		t.Fatal(err)
 	}

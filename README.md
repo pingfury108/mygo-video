@@ -2,7 +2,7 @@
 
 用 Go 和 [MyGo](https://github.com/egoist/mygo) 写的原生桌面视频播放器。没有 WebView，界面由 MyGo 在 GPU 上绘制；视频交给系统的媒体框架硬解（macOS AVFoundation、Windows Media Foundation、Linux GStreamer）。
 
-当前是 **M0 + M1**：本地视频库、详情、播放、续播、键盘控制。插件系统（腾讯/优酷等来源）按 [docs/PLAN.md](docs/PLAN.md) 的 M2–M5 逐步加。
+当前已到 **M3**：本地视频库、WebDAV、IPTV 直播、播放器、插件系统（腾讯/优酷等来源按 [docs/PLAN.md](docs/PLAN.md) 的 M4–M5 继续）。
 
 ## 运行
 
@@ -42,6 +42,7 @@ go tool mygo build    # 打包到 build/
 
 - 本地视频库：扫描文件夹，按修改时间排序，识别 `S02E05` 这样的集数
 - 内置 WebDAV：设置里填地址和账号，浏览服务器文件夹，播放视频
+- 内置 IPTV：设置里填 M3U/M3U8 列表（地址或本地文件），按分组浏览直播频道
 - 插件源：数据目录 `plugins/` 下的 JS/TS 插件，接入后出现在侧栏底部的源列表里；播放走本机代理
 - 封面：用本机 `ffmpeg` 从视频 10 秒处抽帧，640×360 JPEG 缓存在数据目录；列表、详情海报、首页 hero 都用它，没有 ffmpeg 时回退到首字色块
 - 首页：继续观看（全宽 hero）、最近添加
@@ -50,6 +51,7 @@ go tool mygo build    # 打包到 build/
 - 详情：海报、文件信息、选集、播放进度、从头播放、清除记录
 - 剧集：同名的 `S02E05` 归到同一部剧，详情页选集，播放页切上一集/下一集
 - 播放：系统解码、进度条拖动、音量、10 秒快进/后退、续播、倍速、全屏
+- 连播：一集播完自动接下一集；倍速会记住，下次打开沿用
 - 字幕：自动加载同名的 `.srt` / `.vtt`（含 `.zh.srt`），播放页显示，可开关
 - 控制条：播放时 3 秒不动鼠标淡出，移动鼠标回来
 - 快捷键：`空格` 播放/暂停，`← →` 后退/快进，`↑ ↓` 音量，`C` 字幕，`F` 全屏，`,` `.` 上一集/下一集，`Esc` 退出
@@ -80,7 +82,7 @@ go tool mygo build    # 打包到 build/
 
 `permissions.network` 同时限制 `fetch` 和本机代理能访问的 host。`play` 返回 `open` 时在浏览器打开；返回 `drm` 时应用明确拒绝播放。
 
-复制 `examples/demo-plugin` 到数据目录的 `plugins/`，重启后侧栏底部就能切到「演示源」，播放 Apple 的公开 HLS 测试流。
+复制插件文件夹到数据目录的 `plugins/`，或在设置页安装：从文件夹、zip，或 GitHub 仓库。装好后侧栏底部会出现对应的源。
 
 设置页的「插件」里能做：
 
@@ -114,8 +116,7 @@ internal/
   thumb/        ffmpeg 抽帧，缩略图缓存
   streamproxy/  本机代理：请求头注入、HLS 重写、AES-128 解密
   webdav/       WebDAV 客户端：PROPFIND、Basic Auth
-examples/
-  demo-plugin/  一个公开 HLS 测试流的插件
+  iptv/         M3U/M3U8 播放列表解析
 docs/
   PLAN.md        学习笔记、架构、插件协议、里程碑
   PLUGIN-API.md  插件协议草案

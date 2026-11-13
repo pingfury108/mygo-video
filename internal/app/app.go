@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/video"
 
+	"mygo-video/internal/iptv"
 	"mygo-video/internal/local"
 	"mygo-video/internal/media"
 	"mygo-video/internal/plugin"
@@ -26,10 +27,12 @@ import (
 const appName = "MyGo Video"
 
 // The sources that come before the plugins: the library on this computer,
-// and the WebDAV server it reads.
+// the WebDAV server it reads, and the live playlist.
 const (
-	sourceLocal  = 0
-	sourceWebDAV = 1
+	sourceLocal      = 0
+	sourceWebDAV     = 1
+	sourceIPTV       = 2
+	sourcePluginBase = 3
 )
 
 // processStart is when the app's code began, before main: the mark of a dev
@@ -135,6 +138,16 @@ type app struct {
 	webdavDuration   time.Duration
 	webdavDurationID string
 
+	// The live source: the playlist read, its groups, and the group showing.
+	iptvURL      string
+	iptvChannels []iptv.Channel
+	iptvGroups   []string
+	iptvGroup    string
+	iptvBusy     bool
+	iptvLoaded   bool
+	iptvErr      string
+	iptvScroll   float32
+
 	// The scan of every folder below the one showing.
 	webdavAll      bool
 	webdavScanning bool
@@ -164,6 +177,7 @@ type app struct {
 	seekedAt time.Time
 	lastSave time.Time
 	fresh    bool
+	ended    bool
 
 	// The pointer over the video, for the controls to come back at the
 	// window's edges.
@@ -235,11 +249,13 @@ func (a *app) start() {
 	a.pluginDataDir = filepath.Join(dir, "plugin-data")
 	_ = os.MkdirAll(a.pluginsDir, 0o700)
 	a.plugins = plugin.Discover(a.pluginsDir, a.pluginDataDir)
+	a.rate = st.Rate()
 	a.source = st.Source()
-	if a.source < 0 || a.source > len(a.plugins)+1 {
+	if a.source < 0 || a.source > len(a.plugins)+2 {
 		a.source = 0
 	}
 	a.makeWebDAV()
+	a.makeIPTV()
 	// What the last run found shows at once, while the new scan goes on.
 	if cached := st.Items(); len(cached) > 0 {
 		var at time.Time
@@ -387,6 +403,8 @@ func (a *app) items() []media.Item {
 		return a.lib.Items()
 	case sourceWebDAV:
 		return a.webdavItems()
+	case sourceIPTV:
+		return nil
 	default:
 		return a.pluginItems
 	}
@@ -399,8 +417,10 @@ func (a *app) sourceName() string {
 		return "本地视频"
 	case sourceWebDAV:
 		return "WebDAV"
+	case sourceIPTV:
+		return "IPTV"
 	}
-	if i := a.source - 2; i >= 0 && i < len(a.plugins) {
+	if i := a.source - sourcePluginBase; i >= 0 && i < len(a.plugins) {
 		return a.plugins[i].Info().Name
 	}
 	return "本地视频"
@@ -436,6 +456,10 @@ func (a *app) switchSource(i int) {
 		a.webdavAll = len(a.webdavAllItems) > 0
 		atomic.AddInt32(&a.webdavGen, 1)
 	}
+	if i == sourceIPTV {
+		a.iptvGroup = ""
+		a.iptvErr = ""
+	}
 	a.route = pageHome
 	a.store.SetSource(i)
 	a.invalidate()
@@ -443,17 +467,17 @@ func (a *app) switchSource(i int) {
 
 // loadPluginHome asks the source being shown for its home page, once.
 func (a *app) loadPluginHome() {
-	if a.source < 2 || a.pluginBusy || a.pluginBrowse != nil {
+	if a.source < sourcePluginBase || a.pluginBusy || a.pluginBrowse != nil {
 		return
 	}
-	p := a.plugins[a.source-2]
+	p := a.plugins[a.source-sourcePluginBase]
 	id := p.Info().ID
 	a.pluginBusy = true
 	go func() {
 		b, err := p.Home()
 		mygo.RunOnMain(func() {
 			a.pluginBusy = false
-			if a.source < 2 || a.plugins[a.source-2].Info().ID != id {
+			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].Info().ID != id {
 				return
 			}
 			if err != nil {
@@ -590,12 +614,13 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	a.playing = it
 	a.fresh = fromStart
 	a.route = pagePlayer
-	a.rate = 1
+	a.rate = a.store.Rate()
 	a.drawer = false
+	a.ended = false
 	a.uiHidden = false
 	a.uiShown = time.Now()
 	a.seekedAt = time.Time{}
-	p.SetRate(1)
+	p.SetRate(a.rate)
 	p.SetVolume(a.volume)
 	if !fromStart {
 		if prog, ok := a.store.Progress(it.ID); ok && prog.Started() {
@@ -608,12 +633,15 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 }
 
 func (a *app) leavePlayer() {
-	a.saveProgress()
+	a.closePlayer()
 	a.seek = 0
 	a.drawer = false
 	a.uiHidden = false
-	a.closePlayer()
-	a.route = pageDetail
+	if a.playing.Source == "iptv" {
+		a.route = pageHome
+	} else {
+		a.route = pageDetail
+	}
 	a.invalidate()
 }
 
@@ -634,6 +662,10 @@ func (a *app) closePlayer() {
 func (a *app) saveProgress() {
 	p := a.player
 	if p == nil || a.playing.ID == "" {
+		return
+	}
+	// A live channel has no place to keep.
+	if a.playing.Source == "iptv" {
 		return
 	}
 	// Before the first picture the engine has no position to keep, and a

@@ -25,6 +25,10 @@ func (a *app) libraryPage(c *ui.Context) {
 
 	if len(items) == 0 {
 		ui.Column(c).Grow(1).Children(func() {
+			if a.source == sourceIPTV {
+				emptyState(c, "直播在首页", "按分组浏览频道，点开就能看。", nil)
+				return
+			}
 			if a.source == sourceWebDAV {
 				emptyState(c, "WebDAV 还没有东西", "在设置里检查地址、账号，或在首页先打开一个文件夹。", nil)
 				return
@@ -62,7 +66,7 @@ func (a *app) searchPage(c *ui.Context) {
 		switch {
 		case a.source == sourceWebDAV:
 			placeholder = "搜索这个文件夹里的文件名"
-		case a.source >= 2:
+		case a.source >= sourcePluginBase:
 			placeholder = "搜索这个来源里的剧集"
 		}
 		ui.Row(c).Children(func() {
@@ -106,7 +110,7 @@ func (a *app) searchPage(c *ui.Context) {
 // searchPlugin asks the source being shown, off the main thread, once for
 // each query.
 func (a *app) searchPlugin() {
-	if a.source < 2 || a.searchBusy {
+	if a.source < sourcePluginBase || a.searchBusy {
 		return
 	}
 	q := strings.TrimSpace(a.query)
@@ -118,7 +122,7 @@ func (a *app) searchPlugin() {
 	if q == a.searchQuery {
 		return
 	}
-	p := a.plugins[a.source-2]
+	p := a.plugins[a.source-sourcePluginBase]
 	id := p.Info().ID
 	a.searchQuery = q
 	a.searchBusy = true
@@ -126,7 +130,7 @@ func (a *app) searchPlugin() {
 		r, err := p.Search(q, 0)
 		mygo.RunOnMain(func() {
 			a.searchBusy = false
-			if a.source < 2 || a.plugins[a.source-2].Info().ID != id {
+			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].Info().ID != id {
 				return
 			}
 			a.pluginSearch = nil
@@ -157,7 +161,9 @@ func (a *app) searchResults() []media.Item {
 			}
 		}
 		return a.groupSeries(out)
-	case a.source >= 2:
+	case a.source == sourceIPTV:
+		return nil
+	case a.source >= sourcePluginBase:
 		return a.groupSeries(a.pluginSearch)
 	default:
 		return a.groupSeries(a.results())

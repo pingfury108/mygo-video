@@ -174,7 +174,7 @@ func (a *app) sourceSwitcher(c *ui.Context) {
 	if a.source == sourceLocal && a.lib.Scanning() {
 		name = "正在扫描…"
 	}
-	count := len(a.items())
+	count := a.sourceCount()
 	anchor := ui.ButtonBase(c).Height(32).PaddingX(9).Gap(10).Radius(7).
 		AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label("当前源")
 	switch {
@@ -210,13 +210,14 @@ func (a *app) sourceSwitcher(c *ui.Context) {
 		sources := []choice{
 			{name: "本地视频", count: a.lib.Count()},
 			{name: "WebDAV", index: sourceWebDAV, count: len(a.webdavItems())},
+			{name: "IPTV", index: sourceIPTV, count: len(a.iptvChannels)},
 		}
 		for i, pl := range a.plugins {
 			n := 0
-			if a.source == i+2 {
+			if a.source == i+sourcePluginBase {
 				n = len(a.pluginItems)
 			}
-			sources = append(sources, choice{name: pl.Info().Name, index: i + 2, count: n})
+			sources = append(sources, choice{name: pl.Info().Name, index: i + sourcePluginBase, count: n})
 		}
 		for _, src := range sources {
 			index := src.index
@@ -303,6 +304,8 @@ func (a *app) recentItems(n int) []media.Item {
 
 func (a *app) sourceLine() string {
 	switch a.source {
+	case sourceIPTV:
+		return "IPTV · " + a.iptvLine()
 	case sourceWebDAV:
 		if a.webdav == nil {
 			return "WebDAV · 未配置"
@@ -321,6 +324,19 @@ func (a *app) sourceLine() string {
 		return fmt.Sprintf("本地视频 · %d 个", a.lib.Count())
 	}
 	return fmt.Sprintf("%s · %d 个", a.sourceName(), len(a.pluginItems))
+}
+
+// sourceCount is how many things the source showing lists.
+func (a *app) sourceCount() int {
+	switch a.source {
+	case sourceLocal:
+		return a.lib.Count()
+	case sourceWebDAV:
+		return len(a.webdavItems())
+	case sourceIPTV:
+		return len(a.iptvChannels)
+	}
+	return len(a.pluginItems)
 }
 
 func (a *app) libraryLine() string {

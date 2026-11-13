@@ -13,9 +13,21 @@ func (a *app) homePage(c *ui.Context) {
 	items := a.items()
 	ui.Row(c).Height(56).PaddingX(32).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
 		ui.Text(c, "首页").FontSize(15).FontWeight(600)
-		ui.Text(c, a.sourceName()).FontSize(12).TextColor(p.faint)
+		sub := a.sourceName()
+		if a.source == sourceIPTV {
+			sub = a.iptvLine()
+		}
+		ui.Text(c, sub).FontSize(12).TextColor(p.faint)
 		ui.Box(c).Grow(1)
-		iconButton(c, iconSearch, 16, "搜索", func() { a.goPage(pageSearch) })
+		if a.source != sourceIPTV {
+			iconButton(c, iconSearch, 16, "搜索", func() { a.goPage(pageSearch) })
+		} else {
+			iconButton(c, iconRefresh, 16, "刷新列表", func() {
+				a.iptvLoaded = false
+				a.iptvErr = ""
+				a.loadIPTV()
+			})
+		}
 		if a.source == sourceLocal {
 			iconButton(c, iconRefresh, 16, "重新扫描", func() { go a.scan() })
 		}
@@ -25,7 +37,10 @@ func (a *app) homePage(c *ui.Context) {
 	case a.source == sourceWebDAV:
 		a.webdavHome(c)
 		return
-	case a.source >= 2:
+	case a.source == sourceIPTV:
+		a.iptvHome(c)
+		return
+	case a.source >= sourcePluginBase:
 		a.pluginHome(c)
 		return
 	}
@@ -100,7 +115,7 @@ func (a *app) pluginHome(c *ui.Context) {
 		})
 		return
 	}
-	id := a.plugins[a.source-2].Info().ID
+	id := a.plugins[a.source-sourcePluginBase].Info().ID
 	ui.Scroll(c).Grow(1).TrackScroll(&a.homeScroll).Children(func() {
 		ui.Column(c).Padding(8, 32, 40, 32).Gap(26).Children(func() {
 			if len(b.Sections) == 0 {

@@ -19,6 +19,9 @@ type Data struct {
 	Volume   float64                   `json:"volume"`
 	Roots    []string                  `json:"roots,omitempty"`
 	WebDAV   WebDAVConfig              `json:"webdav,omitempty"`
+	IPTV     IPTVConfig                `json:"iptv,omitempty"`
+	// Rate is the speed last chosen, for the next video too.
+	Rate float64 `json:"rate,omitempty"`
 	// Items is what the last scan found, shown at once on the next run
 	// while a new scan goes on.
 	Items     []media.Item `json:"items,omitempty"`
@@ -32,6 +35,11 @@ type WebDAVConfig struct {
 	URL  string `json:"url,omitempty"`
 	User string `json:"user,omitempty"`
 	Pass string `json:"pass,omitempty"`
+}
+
+// IPTVConfig is the playlist a live source reads.
+type IPTVConfig struct {
+	URL string `json:"url,omitempty"`
 }
 
 // Store is the data in memory, written to path.
@@ -67,6 +75,9 @@ func Open(dir string) (*Store, error) {
 	}
 	if s.data.Volume <= 0 {
 		s.data.Volume = 0.8
+	}
+	if s.data.Rate <= 0 {
+		s.data.Rate = 1
 	}
 	return s, nil
 }
@@ -127,6 +138,39 @@ func (s *Store) WebDAV() WebDAVConfig {
 func (s *Store) SetWebDAV(cfg WebDAVConfig) {
 	s.mu.Lock()
 	s.data.WebDAV = cfg
+	s.mu.Unlock()
+	s.Save()
+}
+
+// IPTV is the playlist the live source reads.
+func (s *Store) IPTV() IPTVConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.IPTV
+}
+
+// SetIPTV keeps the playlist.
+func (s *Store) SetIPTV(cfg IPTVConfig) {
+	s.mu.Lock()
+	s.data.IPTV = cfg
+	s.mu.Unlock()
+	s.Save()
+}
+
+// Rate is the speed the player runs at.
+func (s *Store) Rate() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.Rate <= 0 {
+		return 1
+	}
+	return s.data.Rate
+}
+
+// SetRate keeps the speed.
+func (s *Store) SetRate(r float64) {
+	s.mu.Lock()
+	s.data.Rate = r
 	s.mu.Unlock()
 	s.Save()
 }

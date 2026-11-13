@@ -38,6 +38,15 @@ func (a *app) playerPage(c *ui.Context) {
 	} else if !a.uiHidden && time.Since(a.uiShown) > hideAfter {
 		a.uiHidden = true
 	}
+	// A series goes on to its next episode when one ends.
+	if pl.Ready() && pl.Ended() {
+		if !a.ended {
+			a.ended = true
+			a.playNext()
+		}
+	} else {
+		a.ended = false
+	}
 
 	root := ui.Box(c).Fill().Background(ui.Hex("#000000"))
 	// Any move brings the controls back; at the edges of the window they
@@ -423,6 +432,7 @@ func (a *app) cycleRate() {
 		}
 	}
 	a.rate = next
+	a.store.SetRate(next)
 	a.player.SetRate(next)
 	a.uiShown = time.Now()
 	a.invalidate()

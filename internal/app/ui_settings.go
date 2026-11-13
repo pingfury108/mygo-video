@@ -59,6 +59,24 @@ func (a *app) settingsPage(c *ui.Context) {
 				})
 			})
 
+			settingsCard(c, "直播（IPTV）", func() {
+				ui.Text(c, "填一个 M3U/M3U8 直播列表的地址，或本地播放列表的路径。").
+					FontSize(11.5).TextColor(p.faint)
+				settingsField(c, "列表地址", &a.iptvURL, "https://example.com/live.m3u")
+				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+					ghostButton(c, "保存 IPTV", iconCheck, a.saveIPTV)
+					switch {
+					case a.iptvErr != "":
+						ui.Text(c, a.iptvErr).FontSize(11).TextColor(ui.Hex("#ef8f7a"))
+					case a.iptvURL != "":
+						ui.Text(c, fmt.Sprintf("%d 个频道", len(a.iptvChannels))).
+							FontSize(11).TextColor(p.faint)
+					default:
+						ui.Text(c, "未配置").FontSize(11).TextColor(p.faint)
+					}
+				})
+			})
+
 			settingsCard(c, "插件", func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
 					ui.Text(c, "插件把更多来源接进来：本地网络、网盘，以及视频站点。").
@@ -67,7 +85,7 @@ func (a *app) settingsPage(c *ui.Context) {
 					a.installMenuButton(c)
 				})
 				if len(a.plugins) == 0 {
-					ui.Text(c, "还没有插件。示例在仓库的 examples/demo-plugin。").
+					ui.Text(c, "还没有插件。可以从文件夹、zip 或 GitHub 安装。").
 						FontSize(11.5).TextColor(p.faint)
 					ui.Text(c, "插件目录："+a.pluginsDir).
 						FontSize(11).TextColor(p.faint)
