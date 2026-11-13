@@ -114,6 +114,7 @@ type app struct {
 	pluginSearch []media.Item
 	pluginErr    string
 	pluginBusy   bool
+	pluginTab    string
 	searchQuery  string
 	searchBusy   bool
 
@@ -460,6 +461,7 @@ func (a *app) switchSource(i int) {
 	a.pluginItems = nil
 	a.pluginSearch = nil
 	a.pluginErr = ""
+	a.pluginTab = ""
 	a.searchQuery = ""
 	if i == sourceWebDAV {
 		a.webdavPath = ""
@@ -481,6 +483,12 @@ func (a *app) switchSource(i int) {
 
 // loadPluginHome asks the source being shown for its home page, once.
 func (a *app) loadPluginHome() {
+	a.loadPluginTab()
+}
+
+// loadPluginTab asks the plugin for the tab showing: its home, or the
+// library it keeps.
+func (a *app) loadPluginTab() {
 	if a.source < sourcePluginBase || a.pluginBusy || a.pluginBrowse != nil {
 		return
 	}
@@ -490,12 +498,26 @@ func (a *app) loadPluginHome() {
 		return
 	}
 	id := pe.man.ID
+	tab := a.pluginTab
 	a.pluginBusy = true
 	go func() {
-		b, err := p.Home()
+		var b *media.Browse
+		var err error
+		switch tab {
+		case "history":
+			b, err = p.History()
+		case "favorites":
+			b, err = p.Favorites()
+		case "following":
+			b, err = p.Following()
+		case "watchlater":
+			b, err = p.WatchLater()
+		default:
+			b, err = p.Home()
+		}
 		mygo.RunOnMain(func() {
 			a.pluginBusy = false
-			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].man.ID != id {
+			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].man.ID != id || a.pluginTab != tab {
 				return
 			}
 			if err != nil {
@@ -514,6 +536,43 @@ func (a *app) loadPluginHome() {
 			a.invalidate()
 		})
 	}()
+}
+
+// setPluginTab shows another of the plugin's pages.
+func (a *app) setPluginTab(tab string) {
+	if a.pluginTab == tab {
+		return
+	}
+	a.pluginTab = tab
+	a.pluginBrowse = nil
+	a.pluginItems = nil
+	a.pluginErr = ""
+	a.pluginBusy = false
+	a.loadPluginTab()
+	a.invalidate()
+}
+
+// pluginTabs are the pages a plugin offers beyond its home.
+func (a *app) pluginTabs() []struct{ key, label string } {
+	tabs := []struct{ key, label string }{{key: "", label: "推荐"}}
+	if a.source < sourcePluginBase {
+		return tabs
+	}
+	p := a.plugins[a.source-sourcePluginBase].p
+	if p == nil {
+		return tabs
+	}
+	for _, t := range []struct{ key, label, export string }{
+		{"history", "历史", "history"},
+		{"favorites", "收藏", "favorites"},
+		{"following", "追番", "following"},
+		{"watchlater", "稍后再看", "watchLater"},
+	} {
+		if p.Can(t.export) {
+			tabs = append(tabs, struct{ key, label string }{t.key, t.label})
+		}
+	}
+	return tabs
 }
 
 // itemFromVideo is a video a plugin listed, as the pages show it.

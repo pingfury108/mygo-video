@@ -122,3 +122,23 @@ func (p *Plugin) Cookie() string {
 	defer p.mu.Unlock()
 	return p.cookie
 }
+
+// History is what the listener watched at the source, when it keeps that.
+func (p *Plugin) History() (*media.Browse, error) { return p.browseOf("history") }
+
+// Favorites are the videos the listener kept at the source.
+func (p *Plugin) Favorites() (*media.Browse, error) { return p.browseOf("favorites") }
+
+// Following is what the listener follows at the source.
+func (p *Plugin) Following() (*media.Browse, error) { return p.browseOf("following") }
+
+// WatchLater is what the listener put aside at the source.
+func (p *Plugin) WatchLater() (*media.Browse, error) { return p.browseOf("watchLater") }
+
+func (p *Plugin) browseOf(name string) (*media.Browse, error) {
+	var b media.Browse
+	if err := p.call(name, nil, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}

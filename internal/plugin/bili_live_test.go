@@ -3,6 +3,8 @@ package plugin
 import (
 	"os"
 	"testing"
+
+	"mygo-video/internal/media"
 )
 
 // TestBilibiliPlugin runs the example plugin against the real site when
@@ -53,5 +55,43 @@ func TestBilibiliPlugin(t *testing.T) {
 	t.Logf("play: %s %s", pb.Type, pb.URL[:min(80, len(pb.URL))])
 	if acc, err := p.Account(); err == nil && acc != nil {
 		t.Logf("account: %s", acc.Name)
+	}
+}
+
+// TestBilibiliLibrary reads the signed-in listener's pages.
+func TestBilibiliLibrary(t *testing.T) {
+	if os.Getenv("NETWORK") == "" || os.Getenv("BILI_COOKIE") == "" {
+		t.Skip("NETWORK and BILI_COOKIE are not set")
+	}
+	p, err := Load("../../examples/bilibili-plugin", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	if err := p.SetSetting("cookie", os.Getenv("BILI_COOKIE")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		load func() (*media.Browse, error)
+	}{
+		{"history", p.History},
+		{"favorites", p.Favorites},
+		{"following", p.Following},
+		{"watchLater", p.WatchLater},
+	} {
+		b, err := c.load()
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		n := 0
+		for _, sec := range b.Sections {
+			n += len(sec.Videos)
+		}
+		if n == 0 {
+			t.Errorf("%s: no videos", c.name)
+		}
+		t.Logf("%s: %d videos", c.name, n)
 	}
 }

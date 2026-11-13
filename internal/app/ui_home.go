@@ -98,11 +98,22 @@ func (a *app) homePage(c *ui.Context) {
 
 // pluginHome is a source's own page, in the sections it gives.
 func (a *app) pluginHome(c *ui.Context) {
+	tabs := a.pluginTabs()
+	if len(tabs) > 1 {
+		ui.ScrollHorizontal(c).Height(36).Children(func() {
+			ui.Row(c).PaddingX(32).Gap(6).Children(func() {
+				for _, t := range tabs {
+					a.pluginTabChip(c, t.key, t.label)
+				}
+			})
+		})
+	}
 	if a.pluginErr != "" {
 		ui.Column(c).Grow(1).Children(func() {
 			emptyState(c, "这个来源没能载入", a.pluginErr, func() {
 				a.pluginBrowse = nil
 				a.pluginErr = ""
+				a.pluginBusy = false
 				a.invalidate()
 			})
 		})
@@ -176,5 +187,29 @@ func (a *app) continueHero(c *ui.Context, it media.Item) {
 					FontSize(11).TextColor(p.muted)
 			})
 		})
+	})
+}
+
+// pluginTabChip is one of a plugin's pages: its home, or its library.
+func (a *app) pluginTabChip(c *ui.Context, key, label string) {
+	p := colors()
+	active := a.pluginTab == key
+	b := ui.ButtonBase(c).Height(28).PaddingX(12).Radius(7).Label(label).
+		AlignItems(ui.Center).Justify(ui.Center)
+	if active {
+		b.Background(p.accent)
+	} else {
+		b.Background(ui.RGBA(255, 255, 255, 0.04))
+		if b.Hovered() {
+			b.Background(p.hover)
+		}
+	}
+	b.OnClick(func() { a.setPluginTab(key) })
+	b.Children(func() {
+		color := p.text
+		if active {
+			color = ui.Hex("#0d0e11")
+		}
+		ui.Text(c, label).FontSize(11.5).TextColor(color).SingleLine()
 	})
 }

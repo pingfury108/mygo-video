@@ -129,7 +129,11 @@ export async function title({ id }) {
 }
 
 export async function play({ id }) {
-  const [bvid, cid0] = String(id).split("#");
+  const raw = String(id);
+  if (raw.startsWith("season:")) {
+    return { open: "https://www.bilibili.com/bangumi/play/ss" + raw.slice(7) };
+  }
+  const [bvid, cid0] = raw.split("#");
   let cid = cid0;
   if (!cid) {
     const d = await api("/x/web-interface/view?bvid=" + bvid);
@@ -155,4 +159,72 @@ export async function account() {
   const d = await api("/x/web-interface/nav");
   if (!d.isLogin) return null;
   return { id: String(d.mid), name: d.uname, avatarUrl: pic(d.face) };
+}
+
+async function mid() {
+  const d = await api("/x/web-interface/nav");
+  if (!d.isLogin) throw new Error("需要先登录");
+  return String(d.mid);
+}
+
+export async function history() {
+  const d = await api("/x/web-interface/history/cursor?ps=30&max=0");
+  const videos = (d.list || [])
+    .filter((v) => v.history && v.history.bvid)
+    .map((v) => ({
+      id: v.history.bvid + "#" + (v.history.cid || ""),
+      name: v.title,
+      poster: pic(v.cover),
+      overview: v.author_name ? "UP主：" + v.author_name : "",
+      duration: (v.duration || 0) * 1000,
+      url: "https://www.bilibili.com/video/" + v.history.bvid,
+    }));
+  return { title: "历史", sections: [{ title: "最近看过", videos }] };
+}
+
+export async function favorites() {
+  const uid = await mid();
+  const folders = await api("/x/v3/fav/folder/created/list-all?up_mid=" + uid);
+  const first = folders.list && folders.list[0];
+  if (!first) return { title: "收藏", sections: [] };
+  const d = await api(
+    "/x/v3/fav/resource/list?media_id=" + first.id + "&ps=30&pn=1",
+  );
+  const videos = (d.medias || []).map((v) => ({
+    id: v.bvid,
+    name: v.title,
+    poster: pic(v.cover),
+    overview: v.intro || (v.upper && v.upper.name ? "UP主：" + v.upper.name : ""),
+    duration: (v.duration || 0) * 1000,
+    url: "https://www.bilibili.com/video/" + v.bvid,
+  }));
+  return { title: "收藏", sections: [{ title: first.title, videos }] };
+}
+
+export async function watchLater() {
+  const d = await api("/x/v2/history/toview?ps=30&pn=1");
+  const videos = (d.list || []).map((v) => ({
+    id: v.bvid,
+    name: v.title,
+    poster: pic(v.pic || v.cover),
+    overview: v.owner && v.owner.name ? "UP主：" + v.owner.name : "",
+    duration: (v.duration || 0) * 1000,
+    url: "https://www.bilibili.com/video/" + v.bvid,
+  }));
+  return { title: "稍后再看", sections: [{ title: "", videos }] };
+}
+
+export async function following() {
+  const uid = await mid();
+  const d = await api(
+    "/x/space/bangumi/follow/list?type=1&follow_status=0&pn=1&ps=30&vmid=" + uid,
+  );
+  const videos = (d.list || []).map((s) => ({
+    id: "season:" + s.season_id,
+    name: s.title,
+    poster: pic(s.cover),
+    overview: s.total_count ? "全 " + s.total_count + " 集" : "",
+    url: "https://www.bilibili.com/bangumi/play/ss" + s.season_id,
+  }));
+  return { title: "追番", sections: [{ title: "", videos }] };
 }

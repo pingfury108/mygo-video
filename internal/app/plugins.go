@@ -99,6 +99,7 @@ func (a *app) reshowSource(id string) {
 	a.pluginSearch = nil
 	a.pluginErr = ""
 	a.pluginBusy = false
+	a.pluginTab = ""
 	a.searchQuery = ""
 	a.sourceMenu = false
 	a.invalidate()
