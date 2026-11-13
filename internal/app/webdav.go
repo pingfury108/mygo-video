@@ -14,10 +14,12 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/video"
 
 	"mygo-video/internal/local"
 	"mygo-video/internal/media"
 	"mygo-video/internal/store"
+	"mygo-video/internal/streamproxy"
 	"mygo-video/internal/webdav"
 )
 
@@ -155,6 +157,37 @@ func (a *app) webdavItemsFrom(entries []webdav.Entry) []media.Item {
 
 // playWebDAV plays a file of the server through the proxy, with the
 // authorization the server asks for.
+// playWebDAV plays a file of the server through the proxy: with the
+// authorization it asks for, and as a fragmented MP4 when the file's moov
+// is at its end, which the player streams.
+func (a *app) playWebDAV(it media.Item, fromStart bool) {
+	a.closePlayer()
+	kind := "mp4"
+	if strings.HasSuffix(strings.ToLower(it.RemoteID), ".m3u8") {
+		kind = "hls"
+	}
+	url, token, err := a.proxy.Open(streamproxy.Stream{
+		URL:     it.RemoteID,
+		Type:    kind,
+		Headers: a.webdavAuth(),
+		FFmpeg:  a.thumbTool,
+	})
+	if err != nil {
+		a.say("%v", err)
+		return
+	}
+	player, err := video.OpenURL(url)
+	if err != nil {
+		a.proxy.Forget(token)
+		a.say("%v", err)
+		return
+	}
+	a.proxyToken = token
+	a.subs = nil
+	a.subsOn = false
+	a.beginPlayback(it, player, fromStart)
+}
+
 // webdavHome is the WebDAV source's page: the folders of where it is, and
 // the videos there.
 func (a *app) webdavHome(c *ui.Context) {

@@ -10,6 +10,7 @@
 package streamproxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -23,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,6 +41,10 @@ type Stream struct {
 	// Headers go with every request to the source: Referer, User-Agent,
 	// Cookie, Origin, and the like.
 	Headers map[string]string
+	// FFmpeg is the program that remuxes an MP4 whose moov is at its end
+	// into a fragmented one, which the system's player streams; empty
+	// leaves such files to it, which waits for the whole of them.
+	FFmpeg string
 }
 
 // Proxy hands streams to the player over loopback.
@@ -51,6 +57,8 @@ type Proxy struct {
 	mu      sync.Mutex
 	streams map[string]*Stream
 	keys    map[string][]byte
+	// faststart says whether an MP4's moov is at its start, by URL.
+	faststart map[string]bool
 }
 
 // New starts a proxy on a loopback port of its own.
@@ -60,11 +68,12 @@ func New() (*Proxy, error) {
 		return nil, err
 	}
 	p := &Proxy{
-		ln:      ln,
-		base:    "http://" + ln.Addr().String(),
-		client:  &http.Client{Transport: &http.Transport{DisableCompression: true}},
-		streams: map[string]*Stream{},
-		keys:    map[string][]byte{},
+		ln:        ln,
+		base:      "http://" + ln.Addr().String(),
+		client:    &http.Client{Transport: &http.Transport{DisableCompression: true}},
+		streams:   map[string]*Stream{},
+		keys:      map[string][]byte{},
+		faststart: map[string]bool{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/s/", p.serve)
@@ -218,6 +227,14 @@ func (p *Proxy) serveBytes(w http.ResponseWriter, r *http.Request, s *Stream, ra
 		return
 	}
 
+	// An MP4 with its moov at the end stalls the system's player over
+	// HTTP: it needs the whole file before the first picture. Remuxing it
+	// to a fragmented one, as a stream, lets the player begin at once.
+	if s.Type == "mp4" && s.FFmpeg != "" && !p.isFaststart(ctx, s, raw) {
+		p.serveRemux(w, r, s, raw)
+		return
+	}
+
 	if key != "" {
 		data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 		if err != nil {
@@ -254,6 +271,84 @@ func (p *Proxy) serveKey(w http.ResponseWriter, r *http.Request, s *Stream, raw 
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Write(key)
+}
+
+// isFaststart says whether an MP4's moov comes before its mdat, which the
+// system's player needs to stream it over HTTP.
+func (p *Proxy) isFaststart(ctx context.Context, s *Stream, raw string) bool {
+	p.mu.Lock()
+	v, ok := p.faststart[raw]
+	p.mu.Unlock()
+	if ok {
+		return v
+	}
+	resp, err := p.fetchMethod(ctx, s, raw, "bytes=0-131071", http.MethodGet)
+	if err != nil {
+		return true
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return true
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<17))
+	if err != nil {
+		return true
+	}
+	v = bytes.Contains(data, []byte("moov"))
+	p.mu.Lock()
+	p.faststart[raw] = v
+	p.mu.Unlock()
+	return v
+}
+
+// serveRemux streams a fragmented MP4 made of the file as it comes, so the
+// player begins without waiting for a moov at the end.
+func (p *Proxy) serveRemux(w http.ResponseWriter, r *http.Request, s *Stream, raw string) {
+	args := []string{"-loglevel", "error", "-rw_timeout", "15000000"}
+	if h := headerLines(s.Headers); h != "" {
+		args = append(args, "-headers", h)
+	}
+	args = append(args,
+		"-i", raw,
+		"-c", "copy",
+		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
+		"-f", "mp4",
+		"pipe:1",
+	)
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, s.FFmpeg, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp4")
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(w, stdout); err != nil {
+		cancel()
+	}
+	_ = cmd.Wait()
+}
+
+func headerLines(h map[string]string) string {
+	if len(h) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for k, v := range h {
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.WriteString(v)
+		b.WriteString("\r\n")
+	}
+	return b.String()
 }
 
 func (p *Proxy) fetch(ctx context.Context, s *Stream, raw, rng string) (*http.Response, error) {

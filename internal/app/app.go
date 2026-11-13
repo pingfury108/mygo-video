@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -137,14 +136,6 @@ type app struct {
 	webdavFound    int
 	webdavAllItems []media.Item
 	webdavGen      int32
-
-	// A WebDAV video being fetched to this computer before it plays.
-	webdavPlayItem    media.Item
-	webdavPlayStart   bool
-	webdavDownloading bool
-	webdavProgress    float64
-	webdavCancel      context.CancelFunc
-	playOpening       bool
 
 	// history and forward are the pages gone back from and forward to,
 	// for the sidebar's arrows.
