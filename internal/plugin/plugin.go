@@ -70,6 +70,13 @@ type Permissions struct {
 	Network []string `json:"network,omitempty"`
 }
 
+// Login is the page a plugin signs in on, and the hosts whose cookies the
+// app keeps for it.
+type Login struct {
+	URL         string   `json:"url"`
+	CookieHosts []string `json:"cookieHosts,omitempty"`
+}
+
 // Manifest is a plugin's plugin.json.
 type Manifest struct {
 	media.Info
@@ -78,6 +85,7 @@ type Manifest struct {
 	MinAppVersion string      `json:"minAppVersion,omitempty"`
 	Description   string      `json:"description,omitempty"`
 	Permissions   Permissions `json:"permissions"`
+	Login         *Login      `json:"login,omitempty"`
 }
 
 // appVersion is the app's version, which the app sets.
@@ -106,6 +114,7 @@ type Plugin struct {
 	mu       sync.Mutex
 	settings map[string]string
 	storage  map[string]json.RawMessage
+	cookie   string
 	vm       *vm
 }
 
@@ -397,6 +406,9 @@ func (p *Plugin) installHost(v *vm) error {
 		}),
 		"setting": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 			return moejs.String(p.Setting(moejs.Arg(args, 0).String())), nil
+		}),
+		"cookie": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, _ []moejs.Value) (moejs.Value, error) {
+			return moejs.String(p.Cookie()), nil
 		}),
 		"openURL": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 			address := moejs.Arg(args, 0).String()

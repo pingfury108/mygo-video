@@ -46,6 +46,8 @@ func (a *app) page(c *ui.Context) {
 		a.searchPage(c)
 	case pagePlugins:
 		a.pluginsPage(c)
+	case pageSignIn:
+		a.signInPage(c)
 	case pageSettings:
 		a.settingsPage(c)
 	case pageDetail:

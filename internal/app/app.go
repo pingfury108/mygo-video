@@ -49,6 +49,7 @@ const (
 	pageSettings
 	pageDetail
 	pagePlayer
+	pageSignIn
 )
 
 // app is the state every view reads and changes, on the main thread.
@@ -124,6 +125,11 @@ type app struct {
 	// second click.
 	pluginUninstall string
 	pluginsScroll   ui.ScrollState
+
+	// signInWeb is the plugin's login page, shown over the app.
+	signInEntry *pluginEntry
+	signInWeb   *mygo.WebView
+	signInErr   string
 
 	// The built-in WebDAV source: the server, what it listed, and where the
 	// pages are.
@@ -260,6 +266,7 @@ func (a *app) start() {
 	_ = os.MkdirAll(a.pluginsDir, 0o700)
 	a.rate = st.Rate()
 	a.loadPlugins()
+	a.loadPluginCookies()
 	a.source = a.sourceIndex(st.Source())
 	a.makeWebDAV()
 	a.makeIPTV()

@@ -5,7 +5,7 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
 
 function cookie() {
-  return (host.setting("cookie") || "").trim();
+  return (host.cookie() || host.setting("cookie") || "").trim();
 }
 
 function headers() {

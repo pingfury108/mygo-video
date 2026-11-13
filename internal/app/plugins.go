@@ -146,6 +146,9 @@ func (a *app) setPluginEnabled(pe *pluginEntry, on bool) {
 			}
 			pe.p = p
 			pe.err = nil
+			if h := a.readPluginCookie(id); h != "" {
+				pe.p.SetCookie(h)
+			}
 			a.store.SetPluginEnabled(id, true)
 			a.invalidate()
 			a.say("已启用 %s", pe.man.Name)

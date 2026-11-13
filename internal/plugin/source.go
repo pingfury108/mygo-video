@@ -108,3 +108,17 @@ type Account struct {
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatarUrl,omitempty"`
 }
+
+// SetCookie keeps the cookies the app signed the plugin in with.
+func (p *Plugin) SetCookie(header string) {
+	p.mu.Lock()
+	p.cookie = header
+	p.mu.Unlock()
+}
+
+// Cookie is what host.cookie returns: the session's cookies, or empty.
+func (p *Plugin) Cookie() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cookie
+}

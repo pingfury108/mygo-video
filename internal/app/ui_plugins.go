@@ -202,15 +202,10 @@ func (a *app) pluginCard(c *ui.Context, pe *pluginEntry) {
 func (a *app) pluginDetail(c *ui.Context, pe *pluginEntry) {
 	p := colors()
 	ui.Column(c).Gap(9).Padding(2, 16, 14, 76).Children(func() {
-		if pe.p != nil && pe.p.Can("signIn") {
+		if pe.man.Login != nil || (pe.p != nil && pe.p.Can("signIn")) {
 			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "账号").FontSize(11).TextColor(p.faint).Width(34)
-				a.pluginAccount(c, pe.p)
-			})
-		} else if pe.p == nil {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "账号").FontSize(11).TextColor(p.faint).Width(34)
-				ui.Text(c, "启用后可登录").FontSize(11.5).TextColor(p.faint)
+				a.pluginLoginRow(c, pe)
 			})
 		}
 		a.pluginFields(c, pe)
@@ -310,6 +305,39 @@ func (a *app) pluginBadge(c *ui.Context, pe *pluginEntry) {
 		label, color, bg = "新安装", p.accent, ui.RGBA(231, 162, 94, 0.14)
 	}
 	ui.Text(c, label).FontSize(9.5).FontWeight(700).TextColor(color).Padding(2, 6).Radius(4).Background(bg)
+}
+
+// pluginLoginRow is the account of a plugin: who is in, and the way in or
+// out.
+func (a *app) pluginLoginRow(c *ui.Context, pe *pluginEntry) {
+	p := colors()
+	if pe.p == nil {
+		ui.Text(c, "启用后可登录").FontSize(11.5).TextColor(p.faint)
+		return
+	}
+	if acc := a.accountFor(pe.p); acc != nil {
+		ui.Text(c, "已登录："+acc.Name).FontSize(11.5).TextColor(p.muted)
+		if pe.man.Login != nil {
+			smallButton(c, "重新登录", func() { a.startSignIn(pe) }, false)
+		}
+		smallButton(c, "退出登录", func() { a.signOutEntry(pe) }, false)
+		return
+	}
+	if a.readPluginCookie(pe.man.ID) != "" {
+		ui.Text(c, "已登录").FontSize(11.5).TextColor(p.muted)
+		if pe.man.Login != nil {
+			smallButton(c, "重新登录", func() { a.startSignIn(pe) }, false)
+		}
+		smallButton(c, "退出登录", func() { a.signOutEntry(pe) }, false)
+		return
+	}
+	ui.Text(c, "未登录").FontSize(11.5).TextColor(p.faint)
+	switch {
+	case pe.man.Login != nil:
+		smallButton(c, "登录", func() { a.startSignIn(pe) }, false)
+	case pe.p.Can("signIn"):
+		smallButton(c, "登录", func() { a.signInPlugin(pe.p) }, false)
+	}
 }
 
 // pluginIsNew says a plugin was installed and never switched on.

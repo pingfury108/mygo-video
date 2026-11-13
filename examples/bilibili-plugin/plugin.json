@@ -6,6 +6,10 @@
   "main": "index.js",
   "description": "热门、搜索与分 P 直接播放；大会员与付费内容可能受限。",
   "playback": "stream",
+  "login": {
+    "url": "https://passport.bilibili.com/login",
+    "cookieHosts": ["bilibili.com"]
+  },
   "permissions": {
     "network": [
       "api.bilibili.com",

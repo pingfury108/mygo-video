@@ -364,6 +364,7 @@ func TestPluginsShot(t *testing.T) {
 				APIVersion:  1,
 				Description: "目录、搜索与追剧；受保护的正片在官方播放页打开。",
 				Permissions: plugin.Permissions{Network: []string{"v.qq.com"}},
+				Login:       &plugin.Login{URL: "https://passport.qq.com/login", CookieHosts: []string{"v.qq.com"}},
 			},
 			state: store.PluginState{Enabled: true, EnabledAt: 1, InstalledAt: 1},
 			p:     p,
