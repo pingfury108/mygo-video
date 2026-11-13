@@ -513,11 +513,42 @@
   .btn.sm { height: 26px; padding: 0 10px; font-size: 11px; }
   .btn.danger { color: #ef8f7a; }
   .btn.danger:hover { background: rgba(239, 143, 122, .12); }
+  .pd-select {
+    height: 28px; padding: 0 10px; border-radius: 6px; display: inline-flex;
+    align-items: center; gap: 8px; background: rgba(255, 255, 255, .05);
+    border: 1px solid var(--line); color: var(--text); font-size: 11.5px;
+  }
+  .bili-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+  .bili-row { display: flex; gap: 16px; overflow: hidden; }
+  .bili-card { width: 232px; flex: 0 0 auto; }
+  .bili-card .poster { aspect-ratio: 16 / 9; height: auto; }
+  .bili-grid .poster { aspect-ratio: 16 / 9; }
+  .signin-wrap { height: 100%; display: flex; align-items: center; justify-content: center; padding: 8px 32px 40px; }
+  .signin-card {
+    width: 820px; max-width: 100%; height: 540px; border-radius: 14px; overflow: hidden;
+    background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column;
+  }
+  .signin-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+  .signin-body { flex: 1; background: #fff; color: #111; display: flex; }
+  .signin-side { width: 260px; border-right: 1px solid #eee; padding: 26px; display: flex; flex-direction: column; gap: 8px; }
+  .signin-side h4 { margin: 0; font-size: 18px; color: #18191c; }
+  .signin-side p { margin: 0; font-size: 11.5px; color: #9499a0; line-height: 1.6; }
+  .signin-form { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+  .signin-qr { width: 150px; height: 150px; border-radius: 8px; background: repeating-conic-gradient(#111 0 25%, #fff 0 50%) 0 0/14px 14px; }
+  .signin-foot { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--line); }
+  .signin-note { font-size: 11px; color: var(--faint); }
   .settings-block {
     padding: 16px 18px; border-radius: 11px; background: var(--panel);
     border: 1px solid var(--line); margin-bottom: 14px;
   }
   .settings-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .screen.floating {
+    position: absolute; left: var(--sidebar-w); right: 0; top: 0; bottom: 0;
+    z-index: 30; background: var(--bg); overflow: hidden;
+  }
+  .screen.floating.active { display: flex; flex-direction: column; }
+  .screen.floating .page { overflow-y: auto; }
+  .screen.floating .signin-wrap { flex: 1; min-height: 0; }
   .section-label { font-size: 12px; font-weight: 600; color: var(--muted); margin: 4px 0 0; }
   .chev { width: 14px; height: 14px; color: var(--faint); flex: 0 0 auto; }
   .fact-row { display: flex; gap: 12px; font-size: 11.5px; color: var(--muted); padding: 5px 0; }
@@ -1253,15 +1284,21 @@
               </div>
             </div>
 
-            <div class="plugin-card" data-state="on">
+            <div class="plugin-card expanded" data-state="on">
               <div class="plugin-head">
                 <div class="plugin-icon" style="background:linear-gradient(145deg,#f39ab4,#c2607e)">B</div>
                 <div class="plugin-main">
                   <div class="plugin-name">哔哩哔哩 <span class="ver">v0.9.1</span> <span class="state on">已启用</span></div>
-                  <div class="plugin-desc">免费与 UGC 内容直接播放；大会员内容可能受限。</div>
-                  <div class="plugin-meta"><span class="ptag">L1 直链</span><span class="ptag">网络 api.bilibili.com</span><span class="ptag ok">已登录 · 阿平</span></div>
+                  <div class="plugin-desc">热门、搜索、追番、收藏、历史与弹幕；1080P 走登录后的 DASH。</div>
+                  <div class="plugin-meta"><span class="ptag">L1 直链</span><span class="ptag">网络 api.bilibili.com</span><span class="ptag ok">已登录 · 哥白尼_大史</span></div>
                 </div>
                 <div class="plugin-actions"><span class="switch on" data-switch></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
+              </div>
+              <div class="plugin-detail">
+                <div class="pd-row"><span class="pd-label">账号</span><span>已登录：哥白尼_大史</span><span class="spacer"></span><button class="btn sm">退出登录</button></div>
+                <div class="pd-row"><span class="pd-label">登录</span><span class="pd-mono">Cookie 只保存在本机，仅用于这个插件</span><span class="spacer"></span><button class="btn sm">重新登录</button></div>
+                <div class="pd-row"><span class="pd-label">设置</span><span>清晰度</span><span class="pd-select">1080P <span style="opacity:.5">▾</span></span><span class="pd-mono">未登录时为 720P</span></div>
+                <div class="pd-row"><span class="pd-label">操作</span><button class="btn sm">打开目录</button><button class="btn sm">重新加载</button><span class="spacer"></span><button class="btn sm danger">卸载插件</button></div>
               </div>
             </div>
 
@@ -1362,6 +1399,114 @@
     </div>
   </main>
 
+      <section class="screen floating" data-screen="bili" data-screen-label="08 哔哩哔哩">
+        <div class="topbar"><h1>哔哩哔哩</h1><span class="sub">已登录 哥白尼_大史</span>
+          <div class="spacer"></div>
+          <button class="btn">搜索</button>
+          <button class="btn">刷新</button>
+        </div>
+        <div class="page">
+          <div class="tabs">
+            <button class="tab on">推荐</button>
+            <button class="tab">追番</button>
+            <button class="tab">收藏</button>
+            <button class="tab">历史</button>
+            <button class="tab">稍后再看</button>
+          </div>
+
+          <div class="section-label" style="margin-bottom:12px">继续观看</div>
+          <div class="bili-row">
+            <button class="card bili-card" data-play>
+              <div class="poster">
+                <div class="art" style="--a1:rgba(104,142,172,.5); --a2:rgba(26,44,58,.55); background-color:#17232c"><div class="grain"></div></div>
+                <span class="tag">31:12</span>
+                <div class="progress-bar"><i style="width:36%"></i></div>
+              </div>
+              <div class="cap"><div class="name">康斯坦丁 · 完整版</div><div class="sub">P1 · 看到 11:12</div></div>
+            </button>
+            <button class="card bili-card" data-play>
+              <div class="poster">
+                <div class="art" style="--a1:rgba(186,132,86,.46); --a2:rgba(58,40,32,.6); background-color:#241b17"><div class="grain"></div></div>
+                <span class="tag">24:40</span>
+                <div class="progress-bar"><i style="width:72%"></i></div>
+              </div>
+              <div class="cap"><div class="name">他真的太优雅了（3/10）</div><div class="sub">P3 · 看到 17:50</div></div>
+            </button>
+            <button class="card bili-card" data-play>
+              <div class="poster">
+                <div class="art" style="--a1:rgba(150,190,160,.42); --a2:rgba(34,58,46,.6); background-color:#152420"><div class="grain"></div></div>
+                <span class="tag">1:02:11</span>
+                <div class="progress-bar"><i style="width:8%"></i></div>
+              </div>
+              <div class="cap"><div class="name">国产动画编年史</div><div class="sub">看到 05:02</div></div>
+            </button>
+          </div>
+
+          <div class="section-label" style="margin:24px 0 12px">热门</div>
+          <div class="bili-grid">
+            <button class="card" data-play>
+              <div class="poster">
+                <div class="art" style="--a1:rgba(104,142,172,.5); --a2:rgba(26,44,58,.55); background-color:#17232c"><div class="grain"></div></div>
+                <span class="tag">18:20</span>
+              </div>
+              <div class="cap"><div class="name">灰太狼与红太狼的非凡之爱</div><div class="sub">动画 · 48 万播放</div></div>
+            </button>
+            <button class="card" data-play>
+              <div class="poster">
+                <div class="art" style="--a1:rgba(210,160,120,.42); --a2:rgba(66,44,32,.6); background-color:#2a1f18"><div class="grain"></div></div>
+                <span class="tag">09:41</span>
+              </div>
+              <div class="cap"><div class="name">臣妾要线上告发熹贵妃</div><div class="sub">搞笑 · 132 万播放</div></div>
+            </button>
+            <button class="card" data-play>
+              <div class="poster">
+                <div class="art" style="--a1:rgba(160,170,205,.44); --a2:rgba(40,48,70,.6); background-color:#1a2030"><div class="grain"></div></div>
+                <span class="tag">12:03</span>
+              </div>
+              <div class="cap"><div class="name">超清修复《康斯坦丁》</div><div class="sub">影视 · 87 万播放</div></div>
+            </button>
+            <button class="card" data-play>
+              <div class="poster">
+                <div class="art" style="--a1:rgba(170,140,190,.42); --a2:rgba(50,38,66,.6); background-color:#221a2c"><div class="grain"></div></div>
+                <span class="tag">44:02</span>
+              </div>
+              <div class="cap"><div class="name">深夜动画推荐</div><div class="sub">动画 · 26 万播放</div></div>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen floating" data-screen="signin" data-screen-label="09 登录">
+        <div class="signin-wrap">
+          <div class="signin-card">
+            <div class="signin-head">
+              <span class="plugin-icon" style="width:26px;height:26px;border-radius:7px;font-size:11px;background:linear-gradient(145deg,#f39ab4,#c2607e)">B</span>
+              <b>登录 哔哩哔哩</b>
+              <div style="flex:1"></div>
+              <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+            </div>
+            <div class="signin-body">
+              <div class="signin-side">
+                <h4>登录</h4>
+                <p>登录后可以看 1080P，并同步历史、追番和收藏。</p>
+                <p style="margin-top:auto">登录页由哔哩哔哩提供，MyGo Video 不看你的密码。登录完点下面的按钮，Cookie 只保存在本机。</p>
+              </div>
+              <div class="signin-form">
+                <div class="signin-qr"></div>
+                <div style="font-size:12px;color:#61666d">使用哔哩哔哩客户端扫码</div>
+                <div style="font-size:11px;color:#9499a0">登录成功后这一窗口会自动关闭</div>
+              </div>
+            </div>
+            <div class="signin-foot">
+              <span class="signin-note">Cookie 只保存在本机，仅用于「哔哩哔哩」这个插件。</span>
+              <div style="flex:1"></div>
+              <button class="btn">取消</button>
+              <button class="btn primary">我已完成登录</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
   <!-- ================= PLAYER ================= -->
   <section class="player" id="player" data-screen="player" data-screen-label="07 播放">
     <div class="stage" id="stage">
@@ -1384,7 +1529,7 @@
       </button>
       <div class="title">雾港 <small>S02E05 潮汐</small></div>
       <div class="spacer"></div>
-      <span class="src-badge"><i></i>腾讯视频 · L2</span>
+      <span class="src-badge"><i></i>哔哩哔哩 · 1080P</span>
       <button class="icon-btn" style="background:rgba(0,0,0,.35)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 00-1.7-1L14.5 3h-5l-.3 2.6a7 7 0 00-1.7 1l-2.4-1-2 3.4L5 10.9a7 7 0 000 2.2l-2 1.6 2 3.4 2.4-1a7 7 0 001.7 1l.3 2.6h5l.3-2.6a7 7 0 001.7-1l2.4 1 2-3.4-2-1.6c.1-.3.1-.7.1-1z"/></svg></button>
     </div>
 
@@ -1410,7 +1555,7 @@
         <button class="pbtn on" id="subBtn" title="字幕"><span class="txt">字</span></button>
         <button class="pbtn" title="倍速" id="rateBtn"><span class="txt" id="rateLabel">1.0×</span></button>
         <div class="spacer"></div>
-        <button class="quality-pill" id="qualityBtn">4K</button>
+        <button class="quality-pill" id="qualityBtn">1080P</button>
         <button class="pbtn" id="episodesBtn" title="剧集">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="1.6"/><path d="M3 9h18M9 5v14"/></svg>
         </button>
@@ -1484,7 +1629,7 @@
     { n: 8, t: "归港", d: "52:00", done: false }
   ];
 
-  var labels = { home: "01 首页", detail: "02 详情", search: "03 搜索", library: "04 片库", plugins: "05 插件管理", settings: "06 设置", player: "07 播放" };
+  var labels = { home: "01 首页", detail: "02 详情", search: "03 搜索", library: "04 片库", plugins: "05 插件管理", settings: "06 设置", player: "07 播放", bili: "08 哔哩哔哩", signin: "09 登录" };
 
   function show(name) {
     var from = current;
