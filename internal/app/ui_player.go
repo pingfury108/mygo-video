@@ -172,19 +172,21 @@ func (a *app) playerControls(c *ui.Context) {
 			if len(a.subs) > 0 {
 				playerButton(c, iconSubs, 17, "字幕", a.subsOn, a.toggleSubtitles)
 			}
-			dm := ui.ButtonBase(c).Height(30).PaddingX(8).Radius(7).Label("弹幕").FocusRing(false)
-			dmColor := ui.RGBA(255, 255, 255, 0.82)
-			if a.danmakuOn {
-				dmColor = colors().accent
+			if len(a.danmaku) > 0 || a.danmakuBusy {
+				dm := ui.ButtonBase(c).Height(30).PaddingX(8).Radius(7).Label("弹幕").FocusRing(false)
+				dmColor := ui.RGBA(255, 255, 255, 0.82)
+				if a.danmakuOn {
+					dmColor = colors().accent
+				}
+				dm.TextColor(dmColor)
+				if dm.Hovered() {
+					dm.Background(ui.RGBA(255, 255, 255, 0.12))
+				}
+				dm.OnClick(a.toggleDanmaku)
+				dm.Children(func() {
+					ui.Text(c, "弹").FontSize(11).FontWeight(600)
+				})
 			}
-			dm.TextColor(dmColor)
-			if dm.Hovered() {
-				dm.Background(ui.RGBA(255, 255, 255, 0.12))
-			}
-			dm.OnClick(a.toggleDanmaku)
-			dm.Children(func() {
-				ui.Text(c, "弹").FontSize(11).FontWeight(600)
-			})
 			rate := ui.ButtonBase(c).Height(30).PaddingX(8).Radius(7).Label("倍速").FocusRing(false)
 			rateColor := ui.RGBA(255, 255, 255, 0.82)
 			if a.rate != 1 {

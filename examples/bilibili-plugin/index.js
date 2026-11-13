@@ -216,6 +216,31 @@ export async function danmaku({ id }) {
   return { cues };
 }
 
+export async function progress({ id, position, duration, done }) {
+  const [bvid, cid] = String(id).split("#");
+  if (!bvid || !cid) return;
+  const m = cookie().match(/(?:^|;\s*)bili_jct=([^;]+)/);
+  if (!m) return;
+  const d = await api("/x/web-interface/view?bvid=" + bvid);
+  const body =
+    "aid=" +
+    d.aid +
+    "&cid=" +
+    cid +
+    "&progress=" +
+    Math.floor((position || 0) / 1000) +
+    "&csrf=" +
+    encodeURIComponent(m[1]);
+  await fetch("https://api.bilibili.com/x/v2/history/report", {
+    method: "POST",
+    headers: Object.assign(
+      { "Content-Type": "application/x-www-form-urlencoded" },
+      headers(),
+    ),
+    body,
+  });
+}
+
 export async function account() {
   if (!cookie()) return null;
   const d = await api("/x/web-interface/nav");

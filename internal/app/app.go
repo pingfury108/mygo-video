@@ -204,6 +204,7 @@ type app struct {
 	// quality is what to ask a plugin for, and playingQuality what it gave.
 	quality        string
 	playingQuality string
+	progressAt     time.Time
 
 	// The pointer over the video, for the controls to come back at the
 	// window's edges.
@@ -790,9 +791,12 @@ func (a *app) saveProgress() {
 		Updated:  time.Now().UnixMilli(),
 	})
 	if a.playing.Source != "" {
-		if p := a.pluginByID(a.playing.Source); p != nil {
-			id := a.playing.RemoteID
-			go p.Progress(id, pos, dur, done)
+		if p := a.pluginByID(a.playing.Source); p != nil && p.Can("progress") {
+			if done || time.Since(a.progressAt) >= 15*time.Second {
+				a.progressAt = time.Now()
+				id := a.playing.RemoteID
+				go p.Progress(id, pos, dur, done)
+			}
 		}
 	}
 }
