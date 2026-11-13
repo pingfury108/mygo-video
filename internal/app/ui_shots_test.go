@@ -395,7 +395,11 @@ func TestPluginsShot(t *testing.T) {
 		},
 	}
 	a.source = sourceLocal
-	a.pluginOpen = "tencent"
+	a.pluginOpen = "builtin:webdav"
+	a.iptvURL = "https://iptv-org.github.io/iptv/countries/cn.m3u"
+	a.iptvLoaded = true
+	a.iptvChannels = []iptv.Channel{{Name: "CCTV-1", Group: "央视"}}
+	a.iptvGroups = []string{"央视"}
 	a.settingTexts = map[string]*string{}
 	a.pluginAccounts = map[string]*plugin.Account{}
 	a.pluginAccountBusy = map[string]bool{}
@@ -416,8 +420,10 @@ func TestPluginsShot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	shoot("18-plugins.png")
+	shoot("18-plugins-builtin.png")
+	a.pluginOpen = "tencent"
+	shoot("19-plugins-open.png")
 	a.pluginOpen = ""
 	a.pluginFilter = "off"
-	shoot("19-plugins-off.png")
+	shoot("20-plugins-off.png")
 }

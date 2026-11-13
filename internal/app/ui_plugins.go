@@ -23,6 +23,10 @@ func (a *app) pluginsPage(c *ui.Context) {
 		ui.Column(c).Padding(8, 32, 40, 32).Gap(14).Children(func() {
 			ui.Text(c, "停用的插件不会加载，也不会出现在侧栏的源列表里；设置、账号和播放记录会保留。").
 				FontSize(11.5).TextColor(p.muted)
+
+			a.builtinSources(c)
+
+			ui.Text(c, "插件").FontSize(12).FontWeight(600).TextColor(p.muted).PaddingY(2)
 			a.pluginsToolbar(c)
 
 			if len(a.plugins) == 0 {
@@ -359,4 +363,92 @@ func firstRune(s string) string {
 		return string(r)
 	}
 	return "?"
+}
+
+// builtinSources are the sources that come with the app, managed on this
+// page with the plugins.
+func (a *app) builtinSources(c *ui.Context) {
+	p := colors()
+	ui.Text(c, "内置源").FontSize(12).FontWeight(600).TextColor(p.muted).PaddingY(2)
+	ui.Column(c).Gap(10).Children(func() {
+		a.builtinCard(c, "local", "本地视频", ui.Hex("#8caad2"), ui.Hex("#5a7699"), "本",
+			fmt.Sprintf("%d 个视频 · %d 个文件夹", a.lib.Count(), len(a.lib.Roots())), p.faint, func() {
+				for _, root := range a.lib.Roots() {
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Icon(c, iconFolder).Size(14, 14).TextColor(p.faint)
+						ui.Text(c, root).FontSize(11.5).TextColor(p.muted).SingleLine()
+					})
+				}
+				ui.Row(c).Gap(8).Children(func() {
+					smallButton(c, "重新扫描", func() {
+						go a.scan()
+						a.invalidate()
+					}, false)
+				})
+			})
+
+		webStatus, webColor := "未配置", p.faint
+		switch {
+		case a.webdavErr != "":
+			webStatus, webColor = a.webdavErr, ui.Hex("#ef8f7a")
+		case a.webdav != nil:
+			webStatus, webColor = fmt.Sprintf("已连接 · %d 个视频", len(a.webdavItems())), ui.Hex("#7ec8a0")
+		}
+		a.builtinCard(c, "webdav", "WebDAV", ui.Hex("#9ec6a4"), ui.Hex("#5f8f6d"), "W",
+			webStatus, webColor, func() {
+				settingsField(c, "地址", &a.webdavURL, "https://nas.local:5005/dav")
+				settingsField(c, "用户名", &a.webdavUser, "可留空")
+				settingsField(c, "密码", &a.webdavPass, "可留空")
+				ui.Row(c).Gap(8).Children(func() {
+					smallButton(c, "保存", a.saveWebDAV, false)
+				})
+			})
+
+		iptvColor := p.faint
+		if a.iptvErr != "" {
+			iptvColor = ui.Hex("#ef8f7a")
+		}
+		a.builtinCard(c, "iptv", "IPTV", ui.Hex("#f0b048"), ui.Hex("#d2693a"), "I",
+			a.iptvLine(), iptvColor, func() {
+				settingsField(c, "列表地址", &a.iptvURL, "https://example.com/live.m3u")
+				ui.Row(c).Gap(8).Children(func() {
+					smallButton(c, "保存", a.saveIPTV, false)
+				})
+			})
+	})
+}
+
+// builtinCard is one built-in source, open to its settings when clicked.
+func (a *app) builtinCard(c *ui.Context, key, name string, tint1, tint2 ui.Color, mark, status string, statusColor ui.Color, body func()) {
+	p := colors()
+	open := a.pluginOpen == "builtin:"+key
+	ui.Column(c).Radius(11).Background(p.panel).Border(1, p.hairline).Children(func() {
+		head := ui.Row(c).Gap(14).AlignItems(ui.Center).Padding(14, 16, 14, 16)
+		head.OnClick(func() {
+			if open {
+				a.pluginOpen = ""
+			} else {
+				a.pluginOpen = "builtin:" + key
+			}
+			a.pluginUninstall = ""
+			a.invalidate()
+		})
+		head.Children(func() {
+			ui.Box(c).Size(46, 46).Radius(11).Gradient(tint1, tint2, 145).Center().Children(func() {
+				ui.Text(c, mark).FontSize(15).FontWeight(700).TextColor(ui.Hex("#14100a"))
+			})
+			ui.Column(c).Grow(1).Gap(4).Children(func() {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, name).FontSize(13.5).FontWeight(600)
+					ui.Text(c, "内置").FontSize(9.5).TextColor(p.faint).Padding(2, 6).Radius(4).
+						Background(ui.RGBA(255, 255, 255, 0.06))
+				})
+				ui.Text(c, status).FontSize(11.5).TextColor(statusColor).SingleLine()
+			})
+			ui.Icon(c, iconDown).Size(13, 13).TextColor(p.faint)
+		})
+		if open {
+			ui.Column(c).Gap(9).Padding(2, 16, 14, 76).Children(body)
+		}
+	})
 }

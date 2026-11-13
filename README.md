@@ -100,7 +100,9 @@ go tool mygo build    # 打包到 build/
 
 ## 内置源
 
-WebDAV：设置 → 内置源，填地址（含路径，如 `https://nas.local:5005/dav`）、用户名和密码。保存后侧栏底部出现「WebDAV」，可以：
+内置源和插件一起在侧栏的「插件」页管理：本地视频、WebDAV、IPTV 三张卡，点开就能配置。设置页只留播放和关于。
+
+WebDAV：填地址（含路径，如 `https://nas.local:5005/dav`）、用户名和密码。保存后侧栏底部出现「WebDAV」，可以：
 
 - 浏览文件夹，面包屑返回上级
 - 播放里面的视频，走本机代理带上 Basic Auth

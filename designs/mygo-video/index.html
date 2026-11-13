@@ -518,6 +518,8 @@
     border: 1px solid var(--line); margin-bottom: 14px;
   }
   .settings-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .section-label { font-size: 12px; font-weight: 600; color: var(--muted); margin: 4px 0 0; }
+  .chev { width: 14px; height: 14px; color: var(--faint); flex: 0 0 auto; }
   .fact-row { display: flex; gap: 12px; font-size: 11.5px; color: var(--muted); padding: 5px 0; }
   .fact-row > span:first-child { width: 90px; flex: 0 0 auto; color: var(--faint); }
   .plugin-icon {
@@ -1177,6 +1179,49 @@
         <div class="page">
           <div class="plugin-hint">停用的插件不会加载，也不会出现在侧栏的源列表里；设置、账号和播放记录会保留。</div>
 
+          <div class="section-label">内置源</div>
+          <div class="plugin-list">
+            <div class="plugin-card">
+              <div class="plugin-head">
+                <div class="plugin-icon" style="background:linear-gradient(145deg,#8caad2,#5a7699)">本</div>
+                <div class="plugin-main">
+                  <div class="plugin-name">本地视频 <span class="state off">内置</span></div>
+                  <div class="plugin-desc">5 个视频 · 3 个文件夹</div>
+                </div>
+                <div class="plugin-actions"><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></div>
+              </div>
+            </div>
+
+            <div class="plugin-card expanded">
+              <div class="plugin-head">
+                <div class="plugin-icon" style="background:linear-gradient(145deg,#9ec6a4,#5f8f6d)">W</div>
+                <div class="plugin-main">
+                  <div class="plugin-name">WebDAV <span class="state off">内置</span></div>
+                  <div class="plugin-desc">已连接 · 43 个视频</div>
+                </div>
+                <div class="plugin-actions"><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></div>
+              </div>
+              <div class="plugin-detail">
+                <div class="pd-row"><span class="pd-label">地址</span><input class="pd-input" value="http://192.168.31.95:5244"></div>
+                <div class="pd-row"><span class="pd-label">账号</span><input class="pd-input" value="可留空"></div>
+                <div class="pd-row"><span class="pd-label">密码</span><input class="pd-input" value="可留空"></div>
+                <div class="pd-row"><span class="pd-label"></span><button class="btn sm">保存</button><span class="pd-mono">已连接</span></div>
+              </div>
+            </div>
+
+            <div class="plugin-card">
+              <div class="plugin-head">
+                <div class="plugin-icon" style="background:linear-gradient(145deg,#f0b048,#d2693a)">I</div>
+                <div class="plugin-main">
+                  <div class="plugin-name">IPTV <span class="state off">内置</span></div>
+                  <div class="plugin-desc">156 个频道 · 12 组</div>
+                </div>
+                <div class="plugin-actions"><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-label">插件</div>
           <div class="plugin-toolbar">
             <div class="plugin-filters">
               <button class="pfilter active" data-filter="all">全部 6</button>
@@ -1281,45 +1326,8 @@
       </section>
 
       <section class="screen" data-screen="settings" data-screen-label="06 设置">
-        <div class="topbar"><h1>设置</h1><span class="sub">3 个内置源</span></div>
+        <div class="topbar"><h1>设置</h1></div>
         <div class="page">
-          <div class="settings-block">
-            <div class="settings-title">内置源</div>
-            <div class="source-grid">
-              <div class="source-card">
-                <div class="source-logo" style="background:linear-gradient(145deg,#8caad2,#5a7699)">本</div>
-                <div>
-                  <div class="nm">本地视频 <span class="tier local">LOCAL</span></div>
-                  <div class="ds">~/Movies、桌面、下载 · 128 个文件</div>
-                </div>
-                <div class="source-actions"><button class="btn sm">重新扫描</button></div>
-              </div>
-              <div class="source-card">
-                <div class="source-logo" style="background:linear-gradient(145deg,#9ec6a4,#5f8f6d)">W</div>
-                <div>
-                  <div class="nm">WebDAV <span class="tier l1">直链</span></div>
-                  <div class="ds">http://192.168.31.95:5244 · 已连接 · 43 个视频</div>
-                </div>
-                <div class="source-actions"><button class="btn sm">配置</button></div>
-              </div>
-              <div class="source-card">
-                <div class="source-logo" style="background:linear-gradient(145deg,#f0b048,#d2693a)">I</div>
-                <div>
-                  <div class="nm">IPTV <span class="tier l1">直播</span></div>
-                  <div class="ds">cn.m3u · 156 个频道 · 12 组</div>
-                </div>
-                <div class="source-actions"><button class="btn sm">配置</button></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="note">
-            <div>
-              内置源不需要启用或停用：配置好就会出现在侧栏的源菜单里。<br>
-              插件在「插件」页管理；停用后不会出现在源菜单。
-            </div>
-          </div>
-
           <div class="settings-block" style="margin-top:14px">
             <div class="settings-title">播放</div>
             <div class="fact-row"><span>空格</span><span>播放 / 暂停</span></div>

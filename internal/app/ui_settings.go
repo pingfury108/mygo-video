@@ -1,8 +1,6 @@
 package app
 
 import (
-	"fmt"
-
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
@@ -20,72 +18,6 @@ func (a *app) settingsPage(c *ui.Context) {
 
 	ui.Scroll(c).Grow(1).TrackScroll(&a.settingsScroll).Children(func() {
 		ui.Column(c).Padding(8, 32, 40, 32).Gap(16).MaxWidth(820).Children(func() {
-			settingsCard(c, "媒体库", func() {
-				ui.Text(c, "扫描这些文件夹里的视频文件：").
-					FontSize(12).TextColor(p.muted)
-				for _, root := range a.lib.Roots() {
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, iconFolder).Size(14, 14).TextColor(p.faint)
-						ui.Text(c, root).FontSize(12).TextColor(p.muted).SingleLine()
-					})
-				}
-				ui.Row(c).Gap(12).AlignItems(ui.Center).PaddingY(4).Children(func() {
-					ghostButton(c, "重新扫描", iconRefresh, func() {
-						go a.scan()
-						a.invalidate()
-					})
-					ui.Text(c, fmt.Sprintf("%d 个视频 · %d 个文件夹", a.lib.Count(), len(a.lib.Roots()))).
-						FontSize(11).TextColor(p.faint)
-				})
-			})
-
-			settingsCard(c, "内置源", func() {
-				ui.Text(c, "WebDAV").FontSize(12.5).FontWeight(600)
-				ui.Text(c, "填服务器地址（含路径）、用户名和密码。保存后侧栏底部就能切到 WebDAV。").
-					FontSize(11.5).TextColor(p.faint)
-				settingsField(c, "地址", &a.webdavURL, "https://nas.local:5005/dav")
-				settingsField(c, "用户名", &a.webdavUser, "可留空")
-				settingsField(c, "密码", &a.webdavPass, "可留空")
-				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-					ghostButton(c, "保存 WebDAV", iconCheck, a.saveWebDAV)
-					switch {
-					case a.webdav != nil:
-						ui.Text(c, "已配置").FontSize(11).TextColor(p.faint)
-					case a.webdavErr != "":
-						ui.Text(c, a.webdavErr).FontSize(11).TextColor(ui.Hex("#ef8f7a"))
-					default:
-						ui.Text(c, "未配置").FontSize(11).TextColor(p.faint)
-					}
-				})
-			})
-
-			settingsCard(c, "直播（IPTV）", func() {
-				ui.Text(c, "填一个 M3U/M3U8 直播列表的地址，或本地播放列表的路径。").
-					FontSize(11.5).TextColor(p.faint)
-				settingsField(c, "列表地址", &a.iptvURL, "https://example.com/live.m3u")
-				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-					ghostButton(c, "保存 IPTV", iconCheck, a.saveIPTV)
-					switch {
-					case a.iptvErr != "":
-						ui.Text(c, a.iptvErr).FontSize(11).TextColor(ui.Hex("#ef8f7a"))
-					case a.iptvURL != "":
-						ui.Text(c, fmt.Sprintf("%d 个频道", len(a.iptvChannels))).
-							FontSize(11).TextColor(p.faint)
-					default:
-						ui.Text(c, "未配置").FontSize(11).TextColor(p.faint)
-					}
-				})
-			})
-
-			settingsCard(c, "插件", func() {
-				ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-					ui.Text(c, fmt.Sprintf("已启用 %d 个 · 已安装 %d 个。安装、启用和设置都在插件页。", a.enabledPlugins(), len(a.plugins))).
-						FontSize(12).TextColor(p.muted)
-					ui.Box(c).Grow(1)
-					ghostButton(c, "管理插件", iconPlugin, func() { a.goPage(pagePlugins) })
-				})
-			})
-
 			settingsCard(c, "播放", func() {
 				fact(c, "空格", "播放 / 暂停")
 				fact(c, "← →", "后退 / 快进 10 秒")
