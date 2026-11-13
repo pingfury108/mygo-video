@@ -45,6 +45,7 @@ const (
 	pageHome page = iota
 	pageLibrary
 	pageSearch
+	pagePlugins
 	pageSettings
 	pageDetail
 	pagePlayer
@@ -82,7 +83,7 @@ type app struct {
 	// plugins are the sources dropped in, none started yet; proxy is where
 	// their streams are served to the player. source is 0 for the library
 	// on this computer, and else the plugin at source-1.
-	plugins    []*plugin.Plugin
+	plugins    []*pluginEntry
 	proxy      *streamproxy.Proxy
 	source     int
 	proxyToken string
@@ -114,6 +115,15 @@ type app struct {
 	pluginBusy   bool
 	searchQuery  string
 	searchBusy   bool
+
+	// The plugins page: which plugin is open, and how the list is filtered.
+	pluginOpen   string
+	pluginFilter string
+	pluginQuery  string
+	// pluginUninstall is the plugin asked to be removed, waiting for a
+	// second click.
+	pluginUninstall string
+	pluginsScroll   ui.ScrollState
 
 	// The built-in WebDAV source: the server, what it listed, and where the
 	// pages are.
@@ -248,12 +258,9 @@ func (a *app) start() {
 	a.pluginsDir = filepath.Join(dir, "plugins")
 	a.pluginDataDir = filepath.Join(dir, "plugin-data")
 	_ = os.MkdirAll(a.pluginsDir, 0o700)
-	a.plugins = plugin.Discover(a.pluginsDir, a.pluginDataDir)
 	a.rate = st.Rate()
-	a.source = st.Source()
-	if a.source < 0 || a.source > len(a.plugins)+2 {
-		a.source = 0
-	}
+	a.loadPlugins()
+	a.source = a.sourceIndex(st.Source())
 	a.makeWebDAV()
 	a.makeIPTV()
 	// What the last run found shows at once, while the new scan goes on.
@@ -421,15 +428,15 @@ func (a *app) sourceName() string {
 		return "IPTV"
 	}
 	if i := a.source - sourcePluginBase; i >= 0 && i < len(a.plugins) {
-		return a.plugins[i].Info().Name
+		return a.plugins[i].man.Name
 	}
 	return "本地视频"
 }
 
 func (a *app) pluginByID(id string) *plugin.Plugin {
-	for _, p := range a.plugins {
-		if p.Info().ID == id {
-			return p
+	for _, pe := range a.plugins {
+		if pe.man.ID == id {
+			return pe.p
 		}
 	}
 	return nil
@@ -437,7 +444,7 @@ func (a *app) pluginByID(id string) *plugin.Plugin {
 
 // switchSource shows another source and forgets what the last one listed.
 func (a *app) switchSource(i int) {
-	if i < 0 || i > len(a.plugins)+1 || i == a.source {
+	if i < 0 || i > len(a.plugins)+sourcePluginBase-1 || i == a.source {
 		return
 	}
 	a.source = i
@@ -461,7 +468,7 @@ func (a *app) switchSource(i int) {
 		a.iptvErr = ""
 	}
 	a.route = pageHome
-	a.store.SetSource(i)
+	a.store.SetSource(a.sourceID())
 	a.invalidate()
 }
 
@@ -470,14 +477,18 @@ func (a *app) loadPluginHome() {
 	if a.source < sourcePluginBase || a.pluginBusy || a.pluginBrowse != nil {
 		return
 	}
-	p := a.plugins[a.source-sourcePluginBase]
-	id := p.Info().ID
+	pe := a.plugins[a.source-sourcePluginBase]
+	p := pe.p
+	if p == nil {
+		return
+	}
+	id := pe.man.ID
 	a.pluginBusy = true
 	go func() {
 		b, err := p.Home()
 		mygo.RunOnMain(func() {
 			a.pluginBusy = false
-			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].Info().ID != id {
+			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].man.ID != id {
 				return
 			}
 			if err != nil {

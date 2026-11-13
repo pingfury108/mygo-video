@@ -68,7 +68,7 @@ go tool mygo build    # 打包到 build/
   index.js
 ```
 
-`plugin.json` 声明 `id`、`name`、`apiVersion`、`main`、`playback` 和权限。模块导出函数，名字就是能力：
+`plugin.json` 声明 `id`、`name`、`version`、`description`、`apiVersion`、`main`、`playback` 和权限。模块导出函数，名字就是能力：
 
 | 导出 | 参数 | 返回 |
 | --- | --- | --- |
@@ -82,16 +82,20 @@ go tool mygo build    # 打包到 build/
 
 `permissions.network` 同时限制 `fetch` 和本机代理能访问的 host。`play` 返回 `open` 时在浏览器打开；返回 `drm` 时应用明确拒绝播放。
 
-复制插件文件夹到数据目录的 `plugins/`，或在设置页安装：从文件夹、zip，或 GitHub 仓库。装好后侧栏底部会出现对应的源。
+复制插件文件夹到数据目录的 `plugins/`，或在「插件」页安装：从文件夹、zip，或 GitHub 仓库。
 
-设置页的「插件」里能做：
+**插件默认是停用的**：新装的插件不会加载，也不会出现在侧栏的源列表里。到侧栏的「插件」页打开开关后，它才会成为可选来源。停用会关掉插件的 JS 运行时并断开它的网络访问，设置、账号和播放记录保留。
+
+插件页里能做：
 
 - **安装插件…**：从三种地方装
   - **文件夹**：选一个含 `plugin.json` 的文件夹
   - **zip**：解压后找 `plugin.json`，拒绝跑到目录外的路径
   - **GitHub**：填 `owner/repo` 或仓库地址，取最新 release 里适合本平台的 zip；没有 release 就用默认分支
-- **设置项**：manifest 的 `settings` 变成输入框，改完即保存
+- **启用 / 停用**：卡片右侧的开关；启用失败会标出原因，可以重试
+- **设置项**：manifest 的 `settings` 在展开卡片里变成输入框，改完即保存
 - **账号**：`登录` / `退出`，调插件的 `signIn` / `signOut` / `account`
+- **卸载**：展开卡片后两次确认，删除插件目录
 - **海报**：从 `poster` 字段加载网络图片，受 `permissions.network` 限制
 
 ## 内置源

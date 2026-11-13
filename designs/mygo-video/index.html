@@ -459,6 +459,97 @@
   }
   .note b { color: var(--text); font-weight: 600; }
 
+  /* plugins */
+  .plugin-hint {
+    padding: 11px 14px; margin-bottom: 14px; border-radius: 9px;
+    background: rgba(231, 162, 94, .07); border: 1px solid rgba(231, 162, 94, .16);
+    color: var(--muted); font-size: 11.5px; line-height: 1.55;
+  }
+  .plugin-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .plugin-filters { display: flex; gap: 6px; }
+  .pfilter {
+    height: 28px; padding: 0 12px; border-radius: 7px;
+    background: rgba(255, 255, 255, .04); color: var(--muted); font-size: 11.5px;
+    transition: background .15s, color .15s;
+  }
+  .pfilter:hover { background: rgba(255, 255, 255, .08); color: var(--text); }
+  .pfilter.active { background: var(--accent-soft); color: var(--accent); }
+  .plugin-search {
+    margin-left: auto; display: flex; align-items: center; gap: 7px;
+    height: 30px; padding: 0 10px; min-width: 210px; border-radius: 7px;
+    background: var(--panel); border: 1px solid var(--line);
+    color: var(--faint); font-size: 11.5px;
+  }
+  .plugin-search svg { width: 13px; height: 13px; }
+  .plugin-list { display: flex; flex-direction: column; gap: 10px; }
+  .plugin-card {
+    border-radius: 11px; background: var(--panel); border: 1px solid var(--line);
+    transition: border-color .15s, background .15s, opacity .15s;
+    overflow: hidden;
+  }
+  .plugin-head {
+    display: grid; grid-template-columns: 46px minmax(0, 1fr) auto;
+    gap: 14px; align-items: center; padding: 14px 16px; cursor: pointer;
+  }
+  .plugin-card:hover { border-color: var(--line-strong); }
+  .plugin-card.off { opacity: .58; }
+  .plugin-card.off:hover { opacity: .82; }
+  .plugin-card.error { border-color: rgba(239, 143, 122, .32); }
+  .plugin-card.new { border-color: rgba(231, 162, 94, .5); }
+  .plugin-card.expanded { background: var(--panel-2); border-color: rgba(255, 255, 255, .16); }
+  .plugin-card.expanded.off { opacity: 1; }
+  .plugin-detail { display: none; flex-direction: column; gap: 9px; padding: 2px 16px 14px 76px; }
+  .plugin-card.expanded .plugin-detail { display: flex; }
+  .pd-row { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--muted); }
+  .pd-row .spacer { flex: 1; }
+  .pd-label { width: 34px; flex: 0 0 auto; color: var(--faint); font-size: 11px; }
+  .pd-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; color: var(--faint); }
+  .pd-input {
+    height: 28px; width: 220px; padding: 0 9px; border-radius: 6px;
+    background: rgba(255, 255, 255, .05); border: 1px solid var(--line);
+    color: var(--text); font-size: 11.5px; outline: none;
+  }
+  .pd-input:focus { border-color: var(--accent); }
+  .btn.sm { height: 26px; padding: 0 10px; font-size: 11px; }
+  .btn.danger { color: #ef8f7a; }
+  .btn.danger:hover { background: rgba(239, 143, 122, .12); }
+  .settings-block {
+    padding: 16px 18px; border-radius: 11px; background: var(--panel);
+    border: 1px solid var(--line); margin-bottom: 14px;
+  }
+  .settings-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .fact-row { display: flex; gap: 12px; font-size: 11.5px; color: var(--muted); padding: 5px 0; }
+  .fact-row > span:first-child { width: 90px; flex: 0 0 auto; color: var(--faint); }
+  .plugin-icon {
+    width: 46px; height: 46px; border-radius: 11px;
+    display: grid; place-items: center; font-size: 15px; font-weight: 700;
+    color: #14100a;
+  }
+  .plugin-main { min-width: 0; }
+  .plugin-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; }
+  .plugin-name .ver { font-size: 10.5px; font-weight: 500; color: var(--faint); }
+  .plugin-desc { font-size: 11.5px; color: var(--faint); margin-top: 4px; line-height: 1.5; }
+  .plugin-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+  .ptag {
+    font-size: 9.5px; padding: 2px 6px; border-radius: 4px;
+    background: rgba(255, 255, 255, .06); color: var(--muted);
+  }
+  .ptag.ok { background: rgba(126, 200, 160, .12); color: #7ec8a0; }
+  .ptag.err { background: rgba(239, 143, 122, .14); color: #ef8f7a; }
+  .state { font-size: 9.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+  .state.on { background: rgba(126, 200, 160, .14); color: #7ec8a0; }
+  .state.off { background: rgba(255, 255, 255, .06); color: var(--faint); }
+  .state.err { background: rgba(239, 143, 122, .14); color: #ef8f7a; }
+  .state.new { background: var(--accent-soft); color: var(--accent); }
+  .plugin-actions { display: flex; align-items: center; gap: 4px; }
+  .plugin-actions .icon-btn {
+    width: 27px; height: 27px; border-radius: 6px;
+    display: grid; place-items: center; color: var(--faint);
+  }
+  .plugin-actions .icon-btn:hover { background: rgba(255, 255, 255, .07); color: var(--text); }
+  .plugin-actions .icon-btn svg { width: 15px; height: 15px; }
+
+
   /* mini bar */
   .mini-bar {
     position: absolute; left: 0; right: 0; bottom: 0; height: var(--bar-h); z-index: 16;
@@ -691,11 +782,12 @@
 
     <div class="side-spacer"></div>
 
-    <button class="nav-item" data-go="sources">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>
-      <span>源与插件</span>
+    <button class="nav-item" data-go="plugins">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      <span>插件</span>
+      <span class="badge">2/6</span>
     </button>
-    <button class="nav-item" data-go="sources">
+    <button class="nav-item" data-go="settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>
       <span>设置</span>
     </button>
@@ -1074,8 +1166,8 @@
       </section>
 
       <!-- ================= SOURCES ================= -->
-      <section class="screen" data-screen="sources" data-screen-label="05 源与插件">
-        <div class="topbar"><h1>源与插件</h1><span class="sub">6 个源 · 3 个已启用</span>
+      <section class="screen" data-screen="plugins" data-screen-label="05 插件管理">
+        <div class="topbar"><h1>插件</h1><span class="sub">2 个已启用 · 共 6 个</span>
           <div class="spacer"></div>
           <button class="btn">从文件夹安装</button>
           <button class="btn primary">
@@ -1083,69 +1175,165 @@
           </button>
         </div>
         <div class="page">
-          <div class="source-grid">
-            <div class="source-card">
-              <div class="source-logo" style="background:linear-gradient(145deg,#8caad2,#5a7699)">本</div>
-              <div>
-                <div class="nm">本地视频 <span class="tier local">LOCAL</span></div>
-                <div class="ds">~/Movies、外接硬盘 · 128 个文件 · 支持 MKV / MP4 / HEVC</div>
+          <div class="plugin-hint">停用的插件不会加载，也不会出现在侧栏的源列表里；设置、账号和播放记录会保留。</div>
+
+          <div class="plugin-toolbar">
+            <div class="plugin-filters">
+              <button class="pfilter active" data-filter="all">全部 6</button>
+              <button class="pfilter" data-filter="on">已启用 2</button>
+              <button class="pfilter" data-filter="off">未启用 4</button>
+            </div>
+            <div class="plugin-search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>
+              搜索插件
+            </div>
+          </div>
+
+          <div class="plugin-list">
+            <div class="plugin-card expanded" data-state="on">
+              <div class="plugin-head">
+                <div class="plugin-icon" style="background:linear-gradient(145deg,#f0b048,#d2693a)">腾</div>
+                <div class="plugin-main">
+                  <div class="plugin-name">腾讯视频 <span class="ver">v1.2.0</span> <span class="state on">已启用</span></div>
+                  <div class="plugin-desc">腾讯视频的目录、搜索与追剧；受保护的正片在官方播放页打开。</div>
+                  <div class="plugin-meta"><span class="ptag">L2 目录</span><span class="ptag">网络 v.qq.com</span><span class="ptag ok">已登录 · 阿平</span></div>
+                </div>
+                <div class="plugin-actions"><span class="switch on" data-switch></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
               </div>
-              <div class="source-actions"><span class="switch on"></span></div>
+              <div class="plugin-detail">
+                <div class="pd-row"><span class="pd-label">账号</span><span>已登录：阿平</span><span class="spacer"></span><button class="btn sm">退出登录</button></div>
+                <div class="pd-row"><span class="pd-label">设置</span><span>清晰度</span><input class="pd-input" value="1080p"></div>
+                <div class="pd-row"><span class="pd-label">信息</span><span class="pd-mono">com.tencent.video · API v1 · …/plugins/tencent</span></div>
+                <div class="pd-row"><span class="pd-label">操作</span><button class="btn sm">打开目录</button><button class="btn sm">重新加载</button><span class="spacer"></span><button class="btn sm danger">卸载插件</button></div>
+              </div>
             </div>
 
-            <div class="source-card">
-              <div class="source-logo" style="background:linear-gradient(145deg,#f0b048,#d2693a)">腾</div>
-              <div>
-                <div class="nm">腾讯视频 <span class="tier l2">L2 目录</span></div>
-                <div class="ds">已登录 · 追剧与历史同步 · 正片通过官方播放页打开</div>
+            <div class="plugin-card" data-state="on">
+              <div class="plugin-head">
+                <div class="plugin-icon" style="background:linear-gradient(145deg,#f39ab4,#c2607e)">B</div>
+                <div class="plugin-main">
+                  <div class="plugin-name">哔哩哔哩 <span class="ver">v0.9.1</span> <span class="state on">已启用</span></div>
+                  <div class="plugin-desc">免费与 UGC 内容直接播放；大会员内容可能受限。</div>
+                  <div class="plugin-meta"><span class="ptag">L1 直链</span><span class="ptag">网络 api.bilibili.com</span><span class="ptag ok">已登录 · 阿平</span></div>
+                </div>
+                <div class="plugin-actions"><span class="switch on" data-switch></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
               </div>
-              <div class="source-actions"><span class="switch on"></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
             </div>
 
-            <div class="source-card">
-              <div class="source-logo" style="background:linear-gradient(145deg,#7fa8dc,#4a6fa5)">优</div>
-              <div>
-                <div class="nm">优酷 <span class="tier l2">L2 目录</span></div>
-                <div class="ds">未登录 · 仅显示公开目录 · 登录后可同步追剧</div>
+            <div class="plugin-card off" data-state="off">
+              <div class="plugin-head">
+                <div class="plugin-icon" style="background:linear-gradient(145deg,#7fa8dc,#4a6fa5)">优</div>
+                <div class="plugin-main">
+                  <div class="plugin-name">优酷 <span class="ver">v1.0.4</span> <span class="state off">已停用</span></div>
+                  <div class="plugin-desc">优酷的公开目录与搜索；登录后可同步追剧。</div>
+                  <div class="plugin-meta"><span class="ptag">L2 目录</span><span class="ptag">网络 youku.com</span><span class="ptag">未登录</span></div>
+                </div>
+                <div class="plugin-actions"><span class="switch" data-switch></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
               </div>
-              <div class="source-actions"><span class="switch"></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
             </div>
 
-            <div class="source-card">
-              <div class="source-logo" style="background:linear-gradient(145deg,#f39ab4,#c2607e)">B</div>
-              <div>
-                <div class="nm">哔哩哔哩 <span class="tier l1">L1 直链</span></div>
-                <div class="ds">已登录 · 可播放免费与 UGC 内容 · 大会员内容可能受限</div>
+            <div class="plugin-card new off" data-state="off">
+              <div class="plugin-head">
+                <div class="plugin-icon" style="background:linear-gradient(145deg,#b6a6e0,#7a6bab)">J</div>
+                <div class="plugin-main">
+                  <div class="plugin-name">Jellyfin <span class="ver">v0.3.0</span> <span class="state new">新安装</span></div>
+                  <div class="plugin-desc">刚通过 GitHub 安装。打开右侧开关后，它会出现在源列表里。</div>
+                  <div class="plugin-meta"><span class="ptag">L1 直链</span><span class="ptag">网络 自填</span><span class="ptag">来源 GitHub</span></div>
+                </div>
+                <div class="plugin-actions"><span class="switch" data-switch></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
               </div>
-              <div class="source-actions"><span class="switch on"></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
             </div>
 
-            <div class="source-card">
-              <div class="source-logo" style="background:linear-gradient(145deg,#9ec6a4,#5f8f6d)">W</div>
-              <div>
-                <div class="nm">WebDAV <span class="tier l1">L1 直链</span></div>
-                <div class="ds">nas.local:5006 · 已连接 · 2.1 TB 可用</div>
+            <div class="plugin-card error" data-state="err">
+              <div class="plugin-head">
+                <div class="plugin-icon" style="background:linear-gradient(145deg,#9ec6a4,#5f8f6d)">自</div>
+                <div class="plugin-main">
+                  <div class="plugin-name">自建源 <span class="ver">v0.1.2</span> <span class="state err">启用失败</span></div>
+                  <div class="plugin-desc">需要 apiVersion 2，当前应用只支持 1；更新插件或应用后再试。</div>
+                  <div class="plugin-meta"><span class="ptag err">apiVersion 2</span><span class="ptag">打开目录</span></div>
+                </div>
+                <div class="plugin-actions"><span class="switch" data-switch></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
               </div>
-              <div class="source-actions"><span class="switch on"></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
             </div>
 
-            <div class="source-card">
-              <div class="source-logo" style="background:linear-gradient(145deg,#b6a6e0,#7a6bab)">J</div>
-              <div>
-                <div class="nm">Jellyfin <span class="tier l1">L1 直链</span></div>
-                <div class="ds">未配置 · 填写服务器地址与 API Key 后启用</div>
+            <div class="plugin-card off" data-state="off">
+              <div class="plugin-head">
+                <div class="plugin-icon" style="background:linear-gradient(145deg,#8caad2,#5a7699)">豆</div>
+                <div class="plugin-main">
+                  <div class="plugin-name">豆瓣条目 <span class="ver">v0.2.0</span> <span class="state off">已停用</span></div>
+                  <div class="plugin-desc">给本地影片补上简介、演员和海报。</div>
+                  <div class="plugin-meta"><span class="ptag">仅搜索</span><span class="ptag">网络 api.douban.com</span></div>
+                </div>
+                <div class="plugin-actions"><span class="switch" data-switch></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
               </div>
-              <div class="source-actions"><span class="switch"></span><button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div>
             </div>
           </div>
 
           <div class="note">
             <div>
-              <b>关于能力等级</b><br>
-              L1 直链：插件提供可播放的流（经本机代理注入请求头、处理 HLS），app 直接播放。<br>
-              L2 目录：只提供搜索、详情、追剧与进度；受 DRM 保护的正片会在官方 App 或内嵌网页中播放。<br>
+              <b>关于插件</b><br>
+              插件代码以你的用户权限运行，安装前请确认来源。<br>
+              停用会关闭插件的 JS 运行时并断开它的网络访问，磁盘上的文件和账号仍在；启用后恢复到上一次的状态。<br>
               MyGo Video 不包含 DRM 破解。请仅播放你有权访问的内容。
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="settings" data-screen-label="06 设置">
+        <div class="topbar"><h1>设置</h1><span class="sub">3 个内置源</span></div>
+        <div class="page">
+          <div class="settings-block">
+            <div class="settings-title">内置源</div>
+            <div class="source-grid">
+              <div class="source-card">
+                <div class="source-logo" style="background:linear-gradient(145deg,#8caad2,#5a7699)">本</div>
+                <div>
+                  <div class="nm">本地视频 <span class="tier local">LOCAL</span></div>
+                  <div class="ds">~/Movies、桌面、下载 · 128 个文件</div>
+                </div>
+                <div class="source-actions"><button class="btn sm">重新扫描</button></div>
+              </div>
+              <div class="source-card">
+                <div class="source-logo" style="background:linear-gradient(145deg,#9ec6a4,#5f8f6d)">W</div>
+                <div>
+                  <div class="nm">WebDAV <span class="tier l1">直链</span></div>
+                  <div class="ds">http://192.168.31.95:5244 · 已连接 · 43 个视频</div>
+                </div>
+                <div class="source-actions"><button class="btn sm">配置</button></div>
+              </div>
+              <div class="source-card">
+                <div class="source-logo" style="background:linear-gradient(145deg,#f0b048,#d2693a)">I</div>
+                <div>
+                  <div class="nm">IPTV <span class="tier l1">直播</span></div>
+                  <div class="ds">cn.m3u · 156 个频道 · 12 组</div>
+                </div>
+                <div class="source-actions"><button class="btn sm">配置</button></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="note">
+            <div>
+              内置源不需要启用或停用：配置好就会出现在侧栏的源菜单里。<br>
+              插件在「插件」页管理；停用后不会出现在源菜单。
+            </div>
+          </div>
+
+          <div class="settings-block" style="margin-top:14px">
+            <div class="settings-title">播放</div>
+            <div class="fact-row"><span>空格</span><span>播放 / 暂停</span></div>
+            <div class="fact-row"><span>← →</span><span>后退 / 快进 10 秒</span></div>
+            <div class="fact-row"><span>↑ ↓</span><span>音量</span></div>
+            <div class="fact-row"><span>, .</span><span>上一集 / 下一集</span></div>
+            <div class="fact-row"><span>Esc</span><span>退出播放</span></div>
+          </div>
+
+          <div class="settings-block">
+            <div class="settings-title">关于</div>
+            <div class="fact-row"><span>版本</span><span>0.1.0（开发版）</span></div>
+            <div class="fact-row"><span>框架</span><span>MyGo v0.9.0</span></div>
+            <div class="fact-row"><span>数据</span><span class="pd-mono">~/Library/Application Support/MyGo Video Dev</span></div>
           </div>
         </div>
       </section>
@@ -1167,7 +1355,7 @@
   </main>
 
   <!-- ================= PLAYER ================= -->
-  <section class="player" id="player" data-screen="player" data-screen-label="06 播放">
+  <section class="player" id="player" data-screen="player" data-screen-label="07 播放">
     <div class="stage" id="stage">
       <div class="art" style="--a1:rgba(96,140,178,.5); --a2:rgba(26,44,58,.6); background-color:#0c1218">
         <div class="orb"></div><div class="horizon"></div><div class="grain"></div>
@@ -1288,7 +1476,7 @@
     { n: 8, t: "归港", d: "52:00", done: false }
   ];
 
-  var labels = { home: "01 首页", detail: "02 详情", search: "03 搜索", library: "04 片库", sources: "05 源与插件", player: "06 播放" };
+  var labels = { home: "01 首页", detail: "02 详情", search: "03 搜索", library: "04 片库", plugins: "05 插件管理", settings: "06 设置", player: "07 播放" };
 
   function show(name) {
     var from = current;
@@ -1600,6 +1788,44 @@
     if (name !== "player" && current === "player") resetDanmaku();
     _show(name);
   };
+
+  // ---------- plugin toggles ----------
+  document.querySelectorAll('.plugin-card [data-switch]').forEach(function (sw) {
+    sw.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var on = sw.classList.toggle('on');
+      var card = sw.closest('.plugin-card');
+      card.classList.toggle('off', !on);
+      card.setAttribute('data-state', on ? 'on' : 'off');
+      var st = card.querySelector('.state');
+      st.classList.remove('err');
+      st.classList.toggle('on', on);
+      st.classList.toggle('off', !on);
+      st.textContent = on ? '已启用' : '已停用';
+    });
+  });
+  document.querySelectorAll('.pfilter').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.pfilter').forEach(function (x) { x.classList.toggle('active', x === b); });
+      var f = b.getAttribute('data-filter');
+      document.querySelectorAll('.plugin-card').forEach(function (card) {
+        var state = card.getAttribute('data-state');
+        var show = f === 'all' || (f === 'on' ? state === 'on' : state !== 'on');
+        card.style.display = show ? '' : 'none';
+      });
+    });
+  });
+
+  document.querySelectorAll('.plugin-card').forEach(function (card) {
+    var head = card.querySelector('.plugin-head');
+    if (!head) return;
+    head.addEventListener('click', function (e) {
+      if (e.target.closest('.switch') || e.target.closest('.icon-btn')) return;
+      var open = card.classList.contains('expanded');
+      document.querySelectorAll('.plugin-card.expanded').forEach(function (c) { c.classList.remove('expanded'); });
+      card.classList.toggle('expanded', !open);
+    });
+  });
 
   // ---------- boot ----------
   paintProgress();

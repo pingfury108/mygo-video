@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"mygo-video/internal/store"
 )
 
 func TestParseRepo(t *testing.T) {
@@ -119,7 +121,7 @@ func TestInstallDirRejects(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, "plugin.json"), []byte(`{"id":"x","main":"index.js"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.installDir(src); err == nil || !strings.Contains(err.Error(), "插件") {
+	if _, err := a.installDir(src, "folder"); err == nil || !strings.Contains(err.Error(), "插件") {
 		t.Fatalf("err %v", err)
 	}
 }
@@ -144,5 +146,46 @@ func TestDownloadFromGitHub(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "plugin.json")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Plugins start off until the listener switches them on, and one that is
+// on answers to its name.
+func TestPluginsStartOff(t *testing.T) {
+	const man = `{"id":"demo","name":"Demo","version":"0.1.0","apiVersion":1,"main":"index.js"}`
+	const js = `export async function home() { return { title: "Demo", sections: [] }; }`
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "demo")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(man), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "index.js"), []byte(js), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &app{pluginsDir: dir, pluginDataDir: t.TempDir(), store: st}
+	a.loadPlugins()
+	if len(a.plugins) != 1 {
+		t.Fatalf("found %d plugins, want 1", len(a.plugins))
+	}
+	if a.plugins[0].p != nil {
+		t.Fatal("plugin started by default")
+	}
+	if got := a.sourceIndex("plugin:demo"); got != sourceLocal {
+		t.Fatalf("off plugin at %d, want the library", got)
+	}
+	st.SetPluginEnabled("demo", true)
+	a.loadPlugins()
+	if a.plugins[0].p == nil {
+		t.Fatal("enabled plugin did not start")
+	}
+	if got := a.sourceIndex("plugin:demo"); got != sourcePluginBase {
+		t.Fatalf("plugin at %d, want %d", got, sourcePluginBase)
 	}
 }

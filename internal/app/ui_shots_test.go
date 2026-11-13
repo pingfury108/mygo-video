@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -154,8 +155,9 @@ func TestPluginShots(t *testing.T) {
 		t.Skip("SHOTS is not set")
 	}
 	a := shotApp(t)
-	a.plugins = []*plugin.Plugin{loadTestPlugin(t)}
-	a.source = 2
+	p := loadTestPlugin(t)
+	a.plugins = []*pluginEntry{{dir: "/tmp/demo", man: plugin.Manifest{Info: p.Info()}, p: p}}
+	a.source = sourcePluginBase
 	v := media.Video{
 		ID:       "v1",
 		Name:     "BipBop",
@@ -343,4 +345,79 @@ func TestIPTVShot(t *testing.T) {
 	if err := png.Encode(f, tt.Image()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestPluginsShot renders the plugins page with a plugin open, and the
+// list with the ones switched off.
+func TestPluginsShot(t *testing.T) {
+	dir := os.Getenv("SHOTS")
+	if dir == "" {
+		t.Skip("SHOTS is not set")
+	}
+	a := shotApp(t)
+	p := loadTestPlugin(t)
+	a.plugins = []*pluginEntry{
+		{
+			dir: "/tmp/plugins/tencent",
+			man: plugin.Manifest{
+				Info:        media.Info{ID: "tencent", Name: "腾讯视频", Version: "1.2.0"},
+				APIVersion:  1,
+				Description: "目录、搜索与追剧；受保护的正片在官方播放页打开。",
+				Permissions: plugin.Permissions{Network: []string{"v.qq.com"}},
+			},
+			state: store.PluginState{Enabled: true, EnabledAt: 1, InstalledAt: 1},
+			p:     p,
+		},
+		{
+			dir:   "/tmp/plugins/demo",
+			man:   plugin.Manifest{Info: p.Info(), APIVersion: 1, Description: "公开的 HLS 测试流。"},
+			p:     p,
+			state: store.PluginState{Enabled: true, EnabledAt: 1, InstalledAt: 1},
+		},
+		{
+			dir: "/tmp/plugins/youku",
+			man: plugin.Manifest{
+				Info:        media.Info{ID: "youku", Name: "优酷", Version: "1.0.4"},
+				APIVersion:  1,
+				Description: "公开目录与搜索；登录后可同步追剧。",
+				Permissions: plugin.Permissions{Network: []string{"youku.com"}},
+			},
+		},
+		{
+			dir:   "/tmp/plugins/jellyfin",
+			man:   plugin.Manifest{Info: media.Info{ID: "jellyfin", Name: "Jellyfin", Version: "0.3.0"}, APIVersion: 1, Description: "连接自己的服务器，播放其中的影片。"},
+			state: store.PluginState{InstalledAt: 1},
+		},
+		{
+			dir: "/tmp/plugins/old",
+			man: plugin.Manifest{Info: media.Info{ID: "old", Name: "自建源", Version: "0.1.2"}, APIVersion: 1},
+			err: errors.New("需要 apiVersion 2，当前应用只支持 1"),
+		},
+	}
+	a.source = sourceLocal
+	a.pluginOpen = "tencent"
+	a.settingTexts = map[string]*string{}
+	a.pluginAccounts = map[string]*plugin.Account{}
+	a.pluginAccountBusy = map[string]bool{}
+	a.pluginChecked = map[string]bool{}
+	a.route = pagePlugins
+
+	tt := ui.NewTester(a.view, 1180, 780)
+	shoot := func(name string) {
+		t.Helper()
+		tt.Frame()
+		tt.Frame()
+		f, err := os.Create(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := png.Encode(f, tt.Image()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shoot("18-plugins.png")
+	a.pluginOpen = ""
+	a.pluginFilter = "off"
+	shoot("19-plugins-off.png")
 }

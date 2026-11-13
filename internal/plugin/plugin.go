@@ -76,6 +76,7 @@ type Manifest struct {
 	APIVersion    int         `json:"apiVersion"`
 	Main          string      `json:"main,omitempty"`
 	MinAppVersion string      `json:"minAppVersion,omitempty"`
+	Description   string      `json:"description,omitempty"`
 	Permissions   Permissions `json:"permissions"`
 }
 
@@ -111,34 +112,9 @@ type Plugin struct {
 // Load reads and compiles the plugin in dir, keeping its data in dataDir,
 // without running it.
 func Load(dir, dataDir string) (*Plugin, error) {
-	b, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
+	m, err := readManifest(dir)
 	if err != nil {
 		return nil, err
-	}
-	var m Manifest
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, fmt.Errorf("%s: %w", dir, err)
-	}
-	if m.ID == "" {
-		return nil, fmt.Errorf("%s: plugin.json needs an id", dir)
-	}
-	if m.APIVersion == 0 {
-		m.APIVersion = APIVersion
-	}
-	if m.APIVersion > APIVersion {
-		return nil, fmt.Errorf("%s: needs a newer app (apiVersion %d)", dir, m.APIVersion)
-	}
-	if m.Name == "" {
-		m.Name = m.ID
-	}
-	if m.Playback == "" {
-		m.Playback = "stream"
-	}
-	if m.Main == "" {
-		m.Main = "index.js"
-	}
-	if !filepath.IsLocal(m.Main) {
-		return nil, fmt.Errorf("%s: main must be a file in the plugin's folder: %q", dir, m.Main)
 	}
 	js, err := os.ReadFile(filepath.Join(dir, m.Main))
 	if err != nil {
@@ -167,6 +143,66 @@ func Load(dir, dataDir string) (*Plugin, error) {
 	readJSON(filepath.Join(p.data, "settings.json"), &p.settings)
 	readJSON(filepath.Join(p.data, "storage.json"), &p.storage)
 	return p, nil
+}
+
+// readManifest reads plugin.json and checks what doesn't depend on the code.
+func readManifest(dir string) (Manifest, error) {
+	b, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
+	if err != nil {
+		return Manifest{}, err
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		return Manifest{}, fmt.Errorf("%s: %w", dir, err)
+	}
+	if m.ID == "" {
+		return Manifest{}, fmt.Errorf("%s: plugin.json needs an id", dir)
+	}
+	if m.APIVersion == 0 {
+		m.APIVersion = APIVersion
+	}
+	if m.APIVersion > APIVersion {
+		return Manifest{}, fmt.Errorf("%s: needs a newer app (apiVersion %d)", dir, m.APIVersion)
+	}
+	if m.Name == "" {
+		m.Name = m.ID
+	}
+	if m.Playback == "" {
+		m.Playback = "stream"
+	}
+	if m.Main == "" {
+		m.Main = "index.js"
+	}
+	if !filepath.IsLocal(m.Main) {
+		return Manifest{}, fmt.Errorf("%s: main must be a file in the plugin's folder: %q", dir, m.Main)
+	}
+	return m, nil
+}
+
+// Entry is a plugin found on disk, whether or not it is on.
+type Entry struct {
+	Dir      string
+	Manifest Manifest
+	Err      error
+}
+
+// Scan lists the plugins in dir, reading only plugin.json: the code waits
+// for the plugin to be enabled.
+func Scan(dir string) []Entry {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []Entry
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		d := filepath.Join(dir, e.Name())
+		m, err := readManifest(d)
+		out = append(out, Entry{Dir: d, Manifest: m, Err: err})
+	}
+	return out
 }
 
 // Discover loads every plugin in dir. One that doesn't load is logged and

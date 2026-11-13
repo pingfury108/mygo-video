@@ -79,21 +79,11 @@ func (a *app) settingsPage(c *ui.Context) {
 
 			settingsCard(c, "插件", func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-					ui.Text(c, "插件把更多来源接进来：本地网络、网盘，以及视频站点。").
+					ui.Text(c, fmt.Sprintf("已启用 %d 个 · 已安装 %d 个。安装、启用和设置都在插件页。", a.enabledPlugins(), len(a.plugins))).
 						FontSize(12).TextColor(p.muted)
 					ui.Box(c).Grow(1)
-					a.installMenuButton(c)
+					ghostButton(c, "管理插件", iconPlugin, func() { a.goPage(pagePlugins) })
 				})
-				if len(a.plugins) == 0 {
-					ui.Text(c, "还没有插件。可以从文件夹、zip 或 GitHub 安装。").
-						FontSize(11.5).TextColor(p.faint)
-					ui.Text(c, "插件目录："+a.pluginsDir).
-						FontSize(11).TextColor(p.faint)
-					return
-				}
-				for _, pl := range a.plugins {
-					a.pluginSettings(c, pl)
-				}
 			})
 
 			settingsCard(c, "播放", func() {
@@ -128,39 +118,6 @@ func settingsField(c *ui.Context, label string, value *string, placeholder strin
 	ui.Column(c).Gap(4).Children(func() {
 		ui.Text(c, label).FontSize(11.5).TextColor(p.muted)
 		ui.TextInput(c, value).Placeholder(placeholder).Height(32).MaxWidth(460)
-	})
-}
-
-// pluginSettings is one plugin: who is signed in, and what it asks for.
-func (a *app) pluginSettings(c *ui.Context, pl *plugin.Plugin) {
-	p := colors()
-	info := pl.Info()
-	ui.Column(c).Gap(8).Padding(12).Radius(9).
-		Background(p.bg).Border(1, p.hairline).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, info.Name).FontSize(12.5).FontWeight(600)
-			if info.Version != "" {
-				ui.Text(c, "v"+info.Version).FontSize(10.5).TextColor(p.faint)
-			}
-			ui.Box(c).Grow(1)
-			a.pluginAccount(c, pl)
-		})
-		for _, st := range info.Settings {
-			key := info.ID + "/" + st.Key
-			value := a.settingTexts[key]
-			if value == nil {
-				v := pl.Setting(st.Key)
-				value = &v
-				a.settingTexts[key] = value
-			}
-			ui.Column(c).Gap(4).Children(func() {
-				ui.Text(c, st.Label).FontSize(11.5).TextColor(p.muted)
-				input := ui.TextInput(c, value).Placeholder(st.Help).Height(32).MaxWidth(460)
-				if input.Changed() {
-					_ = pl.SetSetting(st.Key, *value)
-				}
-			})
-		}
 	})
 }
 

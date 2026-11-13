@@ -44,6 +44,8 @@ func (a *app) page(c *ui.Context) {
 		a.libraryPage(c)
 	case pageSearch:
 		a.searchPage(c)
+	case pagePlugins:
+		a.pluginsPage(c)
 	case pageSettings:
 		a.settingsPage(c)
 	case pageDetail:
@@ -95,9 +97,9 @@ func (a *app) sidebar(c *ui.Context, bar ui.TitleBar) {
 
 		ui.Box(c).Height(12)
 		ui.Column(c).Gap(2).Children(func() {
-			a.navItem(c, iconHome, "首页", pageHome)
-			a.navItem(c, iconLibrary, "片库", pageLibrary)
-			a.navItem(c, iconSearch, "搜索", pageSearch)
+			a.navItem(c, iconHome, "首页", pageHome, "")
+			a.navItem(c, iconLibrary, "片库", pageLibrary, "")
+			a.navItem(c, iconSearch, "搜索", pageSearch, "")
 		})
 
 		if items := a.recentItems(3); len(items) > 0 {
@@ -113,13 +115,18 @@ func (a *app) sidebar(c *ui.Context, bar ui.TitleBar) {
 		ui.Box(c).Grow(1)
 
 		ui.Column(c).Gap(2).PaddingY(8).Children(func() {
-			a.navItem(c, iconSettings, "设置", pageSettings)
+			badge := ""
+			if len(a.plugins) > 0 {
+				badge = fmt.Sprintf("%d/%d", a.enabledPlugins(), len(a.plugins))
+			}
+			a.navItem(c, iconPlugin, "插件", pagePlugins, badge)
+			a.navItem(c, iconSettings, "设置", pageSettings, "")
 		})
 		a.sourceSwitcher(c)
 	})
 }
 
-func (a *app) navItem(c *ui.Context, icon *ui.SVG, label string, target page) {
+func (a *app) navItem(c *ui.Context, icon *ui.SVG, label string, target page, badge string) {
 	p := colors()
 	active := a.route == target
 	b := ui.ButtonBase(c).Height(32).PaddingX(9).Gap(10).Radius(7).AlignItems(ui.Center).
@@ -142,6 +149,11 @@ func (a *app) navItem(c *ui.Context, icon *ui.SVG, label string, target page) {
 		}
 		ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
 		ui.Text(c, label).FontSize(13).FontWeight(500).SingleLine()
+		if badge != "" {
+			ui.Box(c).Grow(1)
+			ui.Text(c, badge).FontSize(10).FontWeight(600).TextColor(p.accent).
+				Padding(1, 6).Radius(4).Background(ui.RGBA(231, 162, 94, 0.14))
+		}
 	})
 }
 
@@ -212,12 +224,15 @@ func (a *app) sourceSwitcher(c *ui.Context) {
 			{name: "WebDAV", index: sourceWebDAV, count: len(a.webdavItems())},
 			{name: "IPTV", index: sourceIPTV, count: len(a.iptvChannels)},
 		}
-		for i, pl := range a.plugins {
+		for i, pe := range a.plugins {
+			if pe.p == nil {
+				continue
+			}
 			n := 0
 			if a.source == i+sourcePluginBase {
 				n = len(a.pluginItems)
 			}
-			sources = append(sources, choice{name: pl.Info().Name, index: i + sourcePluginBase, count: n})
+			sources = append(sources, choice{name: pe.man.Name, index: i + sourcePluginBase, count: n})
 		}
 		for _, src := range sources {
 			index := src.index

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,7 +19,172 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"mygo-video/internal/plugin"
+	"mygo-video/internal/store"
 )
+
+// pluginEntry is a plugin on disk, and its code once it is on.
+type pluginEntry struct {
+	dir   string
+	man   plugin.Manifest
+	p     *plugin.Plugin
+	err   error
+	busy  bool
+	state store.PluginState
+}
+
+// loadPlugins lists the plugins on disk and starts the ones kept on.
+func (a *app) loadPlugins() {
+	states := a.store.Plugins()
+	found := plugin.Scan(a.pluginsDir)
+	sort.Slice(found, func(i, j int) bool {
+		return strings.ToLower(found[i].Manifest.Name) < strings.ToLower(found[j].Manifest.Name)
+	})
+	var out []*pluginEntry
+	for _, e := range found {
+		pe := &pluginEntry{dir: e.Dir, man: e.Manifest, err: e.Err, state: states[e.Manifest.ID]}
+		if pe.err == nil && pe.state.Enabled {
+			p, err := plugin.Load(pe.dir, a.pluginDataDir)
+			if err != nil {
+				pe.err = err
+			} else {
+				pe.p = p
+			}
+		}
+		out = append(out, pe)
+	}
+	a.plugins = out
+}
+
+// sourceID names the source showing, whatever the plugin order.
+func (a *app) sourceID() string {
+	switch a.source {
+	case sourceLocal:
+		return "local"
+	case sourceWebDAV:
+		return "webdav"
+	case sourceIPTV:
+		return "iptv"
+	}
+	if i := a.source - sourcePluginBase; i >= 0 && i < len(a.plugins) {
+		return "plugin:" + a.plugins[i].man.ID
+	}
+	return "local"
+}
+
+// sourceIndex is where id sits now, or the library when it is gone.
+func (a *app) sourceIndex(id string) int {
+	switch id {
+	case "webdav":
+		return sourceWebDAV
+	case "iptv":
+		return sourceIPTV
+	}
+	if pid, ok := strings.CutPrefix(id, "plugin:"); ok {
+		for i, pe := range a.plugins {
+			if pe.man.ID == pid && pe.p != nil {
+				return i + sourcePluginBase
+			}
+		}
+	}
+	return sourceLocal
+}
+
+// reshowSource shows id again, and falls back to the library when it is
+// no longer there.
+func (a *app) reshowSource(id string) {
+	a.source = a.sourceIndex(id)
+	a.store.SetSource(a.sourceID())
+	a.pluginBrowse = nil
+	a.pluginItems = nil
+	a.pluginSearch = nil
+	a.pluginErr = ""
+	a.pluginBusy = false
+	a.searchQuery = ""
+	a.sourceMenu = false
+	a.invalidate()
+}
+
+// setPluginEnabled starts or stops a plugin's code.
+func (a *app) setPluginEnabled(pe *pluginEntry, on bool) {
+	if pe.busy {
+		return
+	}
+	id := pe.man.ID
+	if !on {
+		if pe.p != nil {
+			pe.p.Close()
+			pe.p = nil
+		}
+		a.store.SetPluginEnabled(id, false)
+		was := a.sourceID()
+		a.source = a.sourceIndex(was)
+		a.store.SetSource(a.sourceID())
+		a.pluginBrowse = nil
+		a.pluginItems = nil
+		a.pluginSearch = nil
+		a.pluginErr = ""
+		a.pluginBusy = false
+		a.sourceMenu = false
+		a.invalidate()
+		return
+	}
+	if pe.p != nil {
+		return
+	}
+	pe.busy = true
+	pe.err = nil
+	dir, dataDir := pe.dir, a.pluginDataDir
+	go func() {
+		p, err := plugin.Load(dir, dataDir)
+		mygo.RunOnMain(func() {
+			pe.busy = false
+			if err != nil {
+				pe.err = err
+				a.say("启用失败：%v", err)
+				a.invalidate()
+				return
+			}
+			pe.p = p
+			pe.err = nil
+			a.store.SetPluginEnabled(id, true)
+			a.invalidate()
+			a.say("已启用 %s", pe.man.Name)
+		})
+	}()
+	a.invalidate()
+}
+
+// enabledPlugins is how many are on.
+func (a *app) enabledPlugins() int {
+	n := 0
+	for _, pe := range a.plugins {
+		if pe.p != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// uninstallPlugin closes a plugin and removes it from disk.
+func (a *app) uninstallPlugin(pe *pluginEntry) {
+	was := a.sourceID()
+	id := pe.man.ID
+	if pe.p != nil {
+		pe.p.Close()
+		pe.p = nil
+	}
+	if err := os.RemoveAll(pe.dir); err != nil {
+		a.say("删不掉 %s：%v", pe.man.Name, err)
+		return
+	}
+	a.store.ForgetPlugin(id)
+	if a.pluginOpen == id {
+		a.pluginOpen = ""
+	}
+	a.loadPlugins()
+	a.reshowSource(was)
+	a.say("已卸载 %s", pe.man.Name)
+}
 
 // installMenuButton opens the ways to install a plugin.
 func (a *app) installMenuButton(c *ui.Context) {
@@ -122,7 +288,7 @@ func (a *app) installZipFrom(data []byte, label string) {
 			return
 		}
 		mygo.RunOnMain(func() {
-			name, err := a.installDir(src)
+			name, err := a.installDir(src, "zip")
 			a.installBusy = false
 			if err != nil {
 				a.installErr = err.Error()
@@ -131,6 +297,7 @@ func (a *app) installZipFrom(data []byte, label string) {
 			}
 			a.installDialog = false
 			a.say("已安装 %s（%s）", name, label)
+			a.goPage(pagePlugins)
 		})
 	}()
 }
@@ -169,7 +336,7 @@ func (a *app) installGitHub() {
 			return
 		}
 		mygo.RunOnMain(func() {
-			name, err := a.installDir(src)
+			name, err := a.installDir(src, "github")
 			a.installBusy = false
 			if err != nil {
 				a.installErr = err.Error()
@@ -178,6 +345,7 @@ func (a *app) installGitHub() {
 			}
 			a.installDialog = false
 			a.say("已安装 %s（%s/%s）", name, owner, repo)
+			a.goPage(pagePlugins)
 		})
 	}()
 }
@@ -190,7 +358,7 @@ func (a *app) installFailed(err error) {
 
 // installDir copies a plugin folder, if it loads, into the plugins
 // directory, and lists the sources again.
-func (a *app) installDir(src string) (string, error) {
+func (a *app) installDir(src, origin string) (string, error) {
 	p, err := plugin.Load(src, a.pluginDataDir)
 	if err != nil {
 		return "", fmt.Errorf("这不是一个插件：%w", err)
@@ -204,35 +372,32 @@ func (a *app) installDir(src string) (string, error) {
 	if err := copyDir(src, dst); err != nil {
 		return "", err
 	}
+	a.store.SetPluginInstalled(id, origin)
+	a.pluginOpen = id
 	a.reloadPlugins()
 	return name, nil
 }
 
 func (a *app) installFrom(src string) {
-	name, err := a.installDir(src)
+	name, err := a.installDir(src, "folder")
 	if err != nil {
 		a.say("%v", err)
 		return
 	}
-	a.say("已安装 %s", name)
+	a.say("已安装 %s，打开开关后启用", name)
+	a.goPage(pagePlugins)
 }
 
 // reloadPlugins lists the plugins again after one is installed.
 func (a *app) reloadPlugins() {
-	a.plugins = plugin.Discover(a.pluginsDir, a.pluginDataDir)
-	a.source = 0
-	a.pluginBrowse = nil
-	a.pluginItems = nil
-	a.pluginSearch = nil
-	a.pluginErr = ""
-	a.searchQuery = ""
+	was := a.sourceID()
+	a.loadPlugins()
+	a.reshowSource(was)
 	a.settingTexts = map[string]*string{}
 	a.pluginAccounts = map[string]*plugin.Account{}
 	a.pluginAccountBusy = map[string]bool{}
 	a.pluginChecked = map[string]bool{}
-	a.sourceMenu = false
 	a.installErr = ""
-	a.invalidate()
 }
 
 // copyDir copies a plugin's folder, leaving out its git history and

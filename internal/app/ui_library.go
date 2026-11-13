@@ -122,15 +122,19 @@ func (a *app) searchPlugin() {
 	if q == a.searchQuery {
 		return
 	}
-	p := a.plugins[a.source-sourcePluginBase]
-	id := p.Info().ID
+	pe := a.plugins[a.source-sourcePluginBase]
+	p := pe.p
+	if p == nil {
+		return
+	}
+	id := pe.man.ID
 	a.searchQuery = q
 	a.searchBusy = true
 	go func() {
 		r, err := p.Search(q, 0)
 		mygo.RunOnMain(func() {
 			a.searchBusy = false
-			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].Info().ID != id {
+			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].man.ID != id {
 				return
 			}
 			a.pluginSearch = nil

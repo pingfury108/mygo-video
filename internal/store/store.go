@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"mygo-video/internal/media"
 )
@@ -27,7 +28,49 @@ type Data struct {
 	Items     []media.Item `json:"items,omitempty"`
 	ScannedAt int64        `json:"scannedAt,omitempty"`
 	// Source is the one last showing, so the next run opens on it.
-	Source int `json:"source,omitempty"`
+	// Source is the one last showing, as "local", "webdav", "iptv" or
+	// "plugin:<id>", so enabling a plugin doesn't change what it names.
+	Source  SourceID               `json:"source,omitempty"`
+	Plugins map[string]PluginState `json:"plugins,omitempty"`
+}
+
+// SourceID is the source last showing. Files from before plugins could be
+// switched off kept its index, which UnmarshalJSON reads.
+type SourceID string
+
+func (s SourceID) MarshalJSON() ([]byte, error) { return json.Marshal(string(s)) }
+
+func (s *SourceID) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		var v string
+		if err := json.Unmarshal(b, &v); err != nil {
+			return err
+		}
+		*s = SourceID(v)
+		return nil
+	}
+	var i int
+	if err := json.Unmarshal(b, &i); err != nil {
+		return err
+	}
+	switch i {
+	case 1:
+		*s = "webdav"
+	case 2:
+		*s = "iptv"
+	default:
+		*s = "local"
+	}
+	return nil
+}
+
+// PluginState is what a run keeps of a plugin: whether it is on, and when
+// it was installed and switched on.
+type PluginState struct {
+	Enabled     bool   `json:"enabled,omitempty"`
+	EnabledAt   int64  `json:"enabledAt,omitempty"`
+	InstalledAt int64  `json:"installedAt,omitempty"`
+	Origin      string `json:"origin,omitempty"`
 }
 
 // WebDAVConfig is the server a WebDAV source reads.
@@ -56,7 +99,7 @@ func Open(dir string) (*Store, error) {
 	}
 	s := &Store{
 		path: filepath.Join(dir, "state.json"),
-		data: Data{Progress: map[string]media.Progress{}, Volume: 0.8},
+		data: Data{Progress: map[string]media.Progress{}, Volume: 0.8, Plugins: map[string]PluginState{}},
 	}
 	b, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -67,7 +110,7 @@ func Open(dir string) (*Store, error) {
 	}
 	if err := json.Unmarshal(b, &s.data); err != nil {
 		// A broken file starts over rather than keeping the app from opening.
-		s.data = Data{Progress: map[string]media.Progress{}, Volume: 0.8}
+		s.data = Data{Progress: map[string]media.Progress{}, Volume: 0.8, Plugins: map[string]PluginState{}}
 		return s, nil
 	}
 	if s.data.Progress == nil {
@@ -78,6 +121,9 @@ func Open(dir string) (*Store, error) {
 	}
 	if s.data.Rate <= 0 {
 		s.data.Rate = 1
+	}
+	if s.data.Plugins == nil {
+		s.data.Plugins = map[string]PluginState{}
 	}
 	return s, nil
 }
@@ -113,16 +159,65 @@ func (s *Store) SetRoots(roots []string) {
 }
 
 // Source is the source last showing.
-func (s *Store) Source() int {
+func (s *Store) Source() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.data.Source
+	return string(s.data.Source)
 }
 
 // SetSource keeps the source showing.
-func (s *Store) SetSource(i int) {
+func (s *Store) SetSource(id string) {
 	s.mu.Lock()
-	s.data.Source = i
+	s.data.Source = SourceID(id)
+	s.mu.Unlock()
+	s.Save()
+}
+
+// Plugins is what a run keeps of the plugins installed.
+func (s *Store) Plugins() map[string]PluginState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]PluginState, len(s.data.Plugins))
+	for id, st := range s.data.Plugins {
+		out[id] = st
+	}
+	return out
+}
+
+// SetPluginEnabled keeps whether a plugin is on.
+func (s *Store) SetPluginEnabled(id string, on bool) {
+	s.mu.Lock()
+	if s.data.Plugins == nil {
+		s.data.Plugins = map[string]PluginState{}
+	}
+	st := s.data.Plugins[id]
+	st.Enabled = on
+	if on {
+		st.EnabledAt = time.Now().Unix()
+	}
+	s.data.Plugins[id] = st
+	s.mu.Unlock()
+	s.Save()
+}
+
+// SetPluginInstalled keeps when and how a plugin came.
+func (s *Store) SetPluginInstalled(id, origin string) {
+	s.mu.Lock()
+	if s.data.Plugins == nil {
+		s.data.Plugins = map[string]PluginState{}
+	}
+	st := s.data.Plugins[id]
+	st.InstalledAt = time.Now().Unix()
+	st.Origin = origin
+	s.data.Plugins[id] = st
+	s.mu.Unlock()
+	s.Save()
+}
+
+// ForgetPlugin drops what was kept of a plugin.
+func (s *Store) ForgetPlugin(id string) {
+	s.mu.Lock()
+	delete(s.data.Plugins, id)
 	s.mu.Unlock()
 	s.Save()
 }

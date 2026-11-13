@@ -115,7 +115,7 @@ func (a *app) pluginHome(c *ui.Context) {
 		})
 		return
 	}
-	id := a.plugins[a.source-sourcePluginBase].Info().ID
+	id := a.plugins[a.source-sourcePluginBase].man.ID
 	ui.Scroll(c).Grow(1).TrackScroll(&a.homeScroll).Children(func() {
 		ui.Column(c).Padding(8, 32, 40, 32).Gap(26).Children(func() {
 			if len(b.Sections) == 0 {
