@@ -255,22 +255,6 @@ func (a *app) sourceSwitcher(c *ui.Context) {
 				}
 			})
 		}
-
-		ui.Box(c).Height(1).Background(p.hairline).MarginY(4)
-
-		manage := ui.ButtonBase(c).Height(30).PaddingX(8).Gap(8).Radius(7).
-			AlignItems(ui.Center).Justify(ui.Start)
-		if manage.Hovered() {
-			manage.Background(p.hover)
-		}
-		manage.OnClick(func() {
-			a.sourceMenu = false
-			a.goPage(pageSettings)
-		})
-		manage.Children(func() {
-			ui.Icon(c, iconSettings).Size(13, 13).TextColor(p.muted)
-			ui.Text(c, "管理源与插件…").FontSize(12.5).TextColor(p.muted)
-		})
 	})
 }
 
