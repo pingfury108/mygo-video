@@ -142,3 +142,22 @@ func (p *Plugin) browseOf(name string) (*media.Browse, error) {
 	}
 	return &b, nil
 }
+
+// Cue is one line of a source's comments, at a time in the video.
+type Cue struct {
+	Time  int64  `json:"time"` // milliseconds
+	Text  string `json:"text"`
+	Color string `json:"color,omitempty"`
+	Mode  int    `json:"mode,omitempty"`
+}
+
+// Danmaku is the comments a video has, laid over it.
+func (p *Plugin) Danmaku(id string) ([]Cue, error) {
+	var r struct {
+		Cues []Cue `json:"cues"`
+	}
+	if err := p.call("danmaku", map[string]string{"id": id}, &r); err != nil {
+		return nil, err
+	}
+	return r.Cues, nil
+}

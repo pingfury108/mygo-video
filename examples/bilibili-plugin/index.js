@@ -184,6 +184,38 @@ function playHeaders() {
   return h;
 }
 
+export async function danmaku({ id }) {
+  const [bvid, cid0] = String(id).split("#");
+  let cid = cid0;
+  if (!cid) {
+    const d = await api("/x/web-interface/view?bvid=" + bvid);
+    cid = d.cid;
+  }
+  const res = await fetch("https://api.bilibili.com/x/v1/dm/list.so?oid=" + cid, {
+    headers: Object.assign({ "Accept-Encoding": "identity" }, headers()),
+  });
+  const xml = await res.text();
+  const cues = [];
+  const re = /<d p="([^"]+)">([^<]*)<\/d>/g;
+  let m;
+  while ((m = re.exec(xml))) {
+    const parts = m[1].split(",");
+    cues.push({
+      time: Math.round(parseFloat(parts[0]) * 1000),
+      mode: Number(parts[1]),
+      color: "#" + Number(parts[3]).toString(16).padStart(6, "0"),
+      text: m[2]
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'"),
+    });
+  }
+  cues.sort((a, b) => a.time - b.time);
+  return { cues };
+}
+
 export async function account() {
   if (!cookie()) return null;
   const d = await api("/x/web-interface/nav");

@@ -99,3 +99,26 @@ func TestBilibiliLibrary(t *testing.T) {
 		t.Logf("%s: %d videos", c.name, n)
 	}
 }
+
+// TestBilibiliDanmaku reads the comments of a video.
+func TestBilibiliDanmaku(t *testing.T) {
+	if os.Getenv("NETWORK") == "" {
+		t.Skip("NETWORK is not set")
+	}
+	p, err := Load("../../examples/bilibili-plugin", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	if c := os.Getenv("BILI_COOKIE"); c != "" {
+		_ = p.SetSetting("cookie", c)
+	}
+	cues, err := p.Danmaku("BV1L6Wm69Eou#43525866910")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cues) == 0 {
+		t.Fatal("no cues")
+	}
+	t.Logf("%d cues, first %q at %dms", len(cues), cues[0].Text, cues[0].Time)
+}

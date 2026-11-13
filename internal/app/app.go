@@ -132,6 +132,11 @@ type app struct {
 	signInWeb   *mygo.WebView
 	signInErr   string
 
+	// The comments over a plugin's video, and whether they show.
+	danmaku     []plugin.Cue
+	danmakuOn   bool
+	danmakuBusy bool
+
 	// The built-in WebDAV source: the server, what it listed, and where the
 	// pages are.
 	webdav          *webdav.Client
@@ -222,7 +227,7 @@ func Run() error {
 	if !mygo.App.RequestSingleInstanceLock() {
 		return nil
 	}
-	a := &app{}
+	a := &app{danmakuOn: true}
 	mygo.App.WhenReady(a.start)
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.shutdown() })
 	return mygo.App.Run()
@@ -688,6 +693,7 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 	a.subsOn = false
 	a.beginPlayback(it, player, fromStart)
 	a.playingQuality = pb.Quality
+	a.loadDanmaku(it)
 }
 
 // beginPlayback makes p the video showing, from where the listener stopped
@@ -702,6 +708,7 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	a.player = p
 	a.playing = it
 	a.playingQuality = ""
+	a.danmaku = nil
 	a.fresh = fromStart
 	a.route = pagePlayer
 	a.rate = a.store.Rate()
