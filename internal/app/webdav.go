@@ -353,11 +353,11 @@ func parentPath(p string) string {
 	return ""
 }
 
-// showWebDAVAll shows every video kept from the last walk, and walks again
-// in the background once that is old.
+// showWebDAVAll shows every video kept from the last walk, and walks only
+// when there is none to show.
 func (a *app) showWebDAVAll() {
 	a.webdavAll = true
-	if len(a.webdavAllItems) == 0 || time.Since(a.webdavIndexAt) > webdavIndexTTL {
+	if len(a.webdavAllItems) == 0 {
 		a.scanWebDAVAll()
 	}
 	a.invalidate()

@@ -165,6 +165,11 @@ type app struct {
 	lastSave time.Time
 	fresh    bool
 
+	// The pointer over the video, for the controls to come back at the
+	// window's edges.
+	pointerX, pointerY float32
+	pointerIn          bool
+
 	// The player's own state: subtitles read, speed, the episodes around
 	// what plays, and whether the controls are out of the way.
 	subs     []subtitle.Cue
@@ -423,7 +428,6 @@ func (a *app) switchSource(i int) {
 		a.webdavLoaded = ""
 		a.webdavHasLoaded = false
 		a.webdavErr = ""
-		a.webdavAll = false
 		a.webdavScanning = false
 		atomic.AddInt32(&a.webdavGen, 1)
 	}

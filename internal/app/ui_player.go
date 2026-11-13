@@ -38,10 +38,25 @@ func (a *app) playerPage(c *ui.Context) {
 	} else if !a.uiHidden && time.Since(a.uiShown) > hideAfter {
 		a.uiHidden = true
 	}
+	// The controls come back at the edges of the window, where the pointer
+	// goes to leave it or to find them.
+	if a.pointerIn {
+		_, h := c.Size()
+		if a.pointerY < 90 || a.pointerY > h-130 {
+			a.uiShown = time.Now()
+			a.uiHidden = false
+		}
+	}
 
 	root := ui.Box(c).Fill().Background(ui.Hex("#000000"))
 	root.ObserveInput(func(ev ui.InputEvent) {
-		if ev.Kind == ui.InputPointerMove {
+		switch ev.Kind {
+		case ui.InputPointerMove:
+			a.pointerX, a.pointerY = ev.X, ev.Y
+			a.pointerIn = true
+			a.uiShown = time.Now()
+			a.uiHidden = false
+		case ui.InputScroll:
 			a.uiShown = time.Now()
 			a.uiHidden = false
 		}
