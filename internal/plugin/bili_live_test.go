@@ -122,3 +122,42 @@ func TestBilibiliDanmaku(t *testing.T) {
 	}
 	t.Logf("%d cues, first %q at %dms", len(cues), cues[0].Text, cues[0].Time)
 }
+
+// TestBilibiliBangumi lists the episodes of a followed season.
+func TestBilibiliBangumi(t *testing.T) {
+	if os.Getenv("NETWORK") == "" || os.Getenv("BILI_COOKIE") == "" {
+		t.Skip("NETWORK and BILI_COOKIE are not set")
+	}
+	p, err := Load("../../examples/bilibili-plugin", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	_ = p.SetSetting("cookie", os.Getenv("BILI_COOKIE"))
+	b, err := p.Following()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Sections) == 0 || len(b.Sections[0].Videos) == 0 {
+		t.Fatal("no followed seasons")
+	}
+	s := b.Sections[0].Videos[0]
+	ti, err := p.Title(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ti.Episodes) == 0 {
+		t.Fatalf("%s: no episodes", s.Name)
+	}
+	t.Logf("%s: %d episodes, first %s", s.Name, len(ti.Episodes), ti.Episodes[0].Name)
+	pb, err := p.Play(ti.Episodes[0].ID, "")
+	if err != nil {
+		t.Logf("play %s: %v (may need a membership)", ti.Episodes[0].Name, err)
+		return
+	}
+	if pb.Dash != nil {
+		t.Logf("play: %s %s", pb.Type, pb.Quality)
+	} else {
+		t.Logf("play: %s %s", pb.Type, pb.Quality)
+	}
+}

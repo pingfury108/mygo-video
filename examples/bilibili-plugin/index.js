@@ -20,7 +20,9 @@ async function api(path) {
   if (!res.ok) throw new Error("B 站返回 " + res.status);
   const body = await res.json();
   if (body.code !== 0) throw new Error(body.message || "B 站接口出错");
-  return body.data;
+  if (body.data !== undefined) return body.data;
+  if (body.result !== undefined) return body.result;
+  return {};
 }
 
 function pic(url) {
@@ -104,7 +106,11 @@ export async function search({ query, offset }) {
 }
 
 export async function title({ id }) {
-  const bvid = String(id).split("#")[0];
+  const raw = String(id);
+  if (raw.startsWith("season:")) {
+    return seasonTitle(raw.slice(7));
+  }
+  const bvid = raw.split("#")[0];
   const d = await api("/x/web-interface/view?bvid=" + bvid);
   const first = d.pages && d.pages.length ? d.pages[0].cid : d.cid;
   const episodes = (d.pages || []).map((pg, i) => ({
@@ -128,10 +134,35 @@ export async function title({ id }) {
   };
 }
 
+async function seasonTitle(sid) {
+  const d = await api("/pgc/view/web/season?season_id=" + sid);
+  const episodes = (d.episodes || []).map((e, i) => ({
+    id: "ep:" + e.id,
+    name: (e.title || "") + (e.long_title ? " · " + e.long_title : ""),
+    poster: pic(e.cover),
+    duration: e.duration ? e.duration * 1000 : 0,
+    series: d.title,
+    episode: i + 1,
+  }));
+  return {
+    video: {
+      id: episodes.length ? episodes[0].id : "season:" + sid,
+      name: d.title,
+      poster: pic(d.cover || d.season_cover),
+      overview: d.desc || d.evaluate || "",
+      url: "https://www.bilibili.com/bangumi/play/ss" + sid,
+    },
+    episodes,
+  };
+}
+
 export async function play({ id, quality }) {
   const raw = String(id);
   if (raw.startsWith("season:")) {
     return { open: "https://www.bilibili.com/bangumi/play/ss" + raw.slice(7) };
+  }
+  if (raw.startsWith("ep:")) {
+    return playEpisode(raw.slice(3));
   }
   const [bvid, cid0] = raw.split("#");
   let cid = cid0;
@@ -182,6 +213,37 @@ function playHeaders() {
   const c = cookie();
   if (c) h.Cookie = c;
   return h;
+}
+
+async function playEpisode(ep) {
+  const d = await api(
+    "/pgc/player/web/playurl?ep_id=" + ep + "&qn=80&fnval=16&fnver=0&fourk=1",
+  );
+  const dash = d.dash;
+  if (dash && dash.video && dash.video.length) {
+    const v = dash.video.find((x) => x.id === 80) || dash.video[0];
+    const a = dash.audio && dash.audio[0];
+    return {
+      type: "dash",
+      dash: {
+        video: v.baseUrl || v.base_url,
+        audio: a ? a.baseUrl || a.base_url : "",
+      },
+      headers: playHeaders(),
+      quality: v.id >= 80 ? "1080P" : v.id >= 64 ? "720P" : v.id + "P",
+    };
+  }
+  const seg = d.durl && d.durl[0];
+  if (seg) {
+    return {
+      url: seg.url,
+      type: "mp4",
+      headers: playHeaders(),
+      quality: "720P",
+      duration: seg.length || 0,
+    };
+  }
+  throw new Error("这一集需要大会员，或暂时不可用");
 }
 
 export async function danmaku({ id }) {

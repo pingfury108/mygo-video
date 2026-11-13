@@ -59,9 +59,9 @@ func (a *app) detailPage(c *ui.Context) {
 							if hasProg && prog.Started() {
 								label = "继续观看"
 							}
-							primaryButton(c, label, iconPlay, func() { a.play(it, false) })
+							primaryButton(c, label, iconPlay, func() { a.play(a.detailPlayTarget(it), false) })
 							if hasProg && prog.Started() {
-								ghostButton(c, "从头播放", nil, func() { a.play(it, true) })
+								ghostButton(c, "从头播放", nil, func() { a.play(a.detailPlayTarget(it), true) })
 							}
 							ghostButton(c, "片库", iconLibrary, func() { a.goPage(pageLibrary) })
 						})
@@ -69,7 +69,11 @@ func (a *app) detailPage(c *ui.Context) {
 				})
 			})
 
-			if eps := a.seriesOf(it); len(eps) > 1 {
+			eps := a.seriesOf(it)
+			if it.Source != "" && it.Source != "webdav" && it.Source != "iptv" && len(a.detailEpisodes) > 0 {
+				eps = a.detailEpisodes
+			}
+			if len(eps) > 1 {
 				ui.Column(c).Gap(10).Children(func() {
 					ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
 						ui.Text(c, "选集").FontSize(13).FontWeight(600)

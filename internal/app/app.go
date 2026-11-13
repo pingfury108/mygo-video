@@ -137,6 +137,10 @@ type app struct {
 	danmakuOn   bool
 	danmakuBusy bool
 
+	// detailEpisodes are the parts or episodes a plugin lists for the
+	// video its detail page shows.
+	detailEpisodes []media.Item
+
 	// The built-in WebDAV source: the server, what it listed, and where the
 	// pages are.
 	webdav          *webdav.Client
@@ -416,9 +420,58 @@ func (a *app) openDetail(it media.Item) {
 	a.history = append(a.history, a.route)
 	a.forward = nil
 	a.current = it
+	a.detailEpisodes = nil
 	a.route = pageDetail
 	a.detailScroll = ui.ScrollState{}
+	if it.Source != "" && it.Source != "webdav" && it.Source != "iptv" {
+		a.loadDetail(it)
+	}
 	a.invalidate()
+}
+
+// loadDetail asks a plugin for the parts of the video its page shows.
+func (a *app) loadDetail(it media.Item) {
+	p := a.pluginByID(it.Source)
+	if p == nil || !p.Can("title") {
+		return
+	}
+	cur := it.ID
+	go func() {
+		t, err := p.Title(it.RemoteID)
+		mygo.RunOnMain(func() {
+			if a.current.ID != cur || err != nil || t == nil {
+				return
+			}
+			if t.Video.Name != "" {
+				a.current.Name = t.Video.Name
+			}
+			if t.Video.Poster != "" {
+				a.current.Poster = t.Video.Poster
+			}
+			if t.Video.Overview != "" {
+				a.current.Overview = t.Video.Overview
+			}
+			a.detailEpisodes = nil
+			for _, e := range t.Episodes {
+				a.detailEpisodes = append(a.detailEpisodes, itemFromVideo(it.Source, e))
+			}
+			a.invalidate()
+		})
+	}()
+}
+
+// detailPlayTarget is the part to play from the detail page: the one
+// showing, or the first a plugin listed.
+func (a *app) detailPlayTarget(it media.Item) media.Item {
+	if len(a.detailEpisodes) == 0 {
+		return it
+	}
+	for _, ep := range a.detailEpisodes {
+		if ep.ID == it.ID {
+			return it
+		}
+	}
+	return a.detailEpisodes[0]
 }
 
 // items is what the source being shown lists.
