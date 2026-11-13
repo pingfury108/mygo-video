@@ -24,7 +24,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,9 +44,19 @@ type Stream struct {
 	// Cookie, Origin, and the like.
 	Headers map[string]string
 	// FFmpeg is the program that remuxes an MP4 whose moov is at its end
-	// into a fragmented one, which the system's player streams; empty
-	// leaves such files to it, which waits for the whole of them.
+	// into HLS, which the player streams; empty leaves such files to it,
+	// which waits for the whole of them.
 	FFmpeg string
+
+	// hls is the remux running for this stream, if any.
+	hls *hlsJob
+}
+
+// hlsJob is a remux writing HLS parts into a folder of its own.
+type hlsJob struct {
+	dir    string
+	cancel context.CancelFunc
+	cmd    *exec.Cmd
 }
 
 // Proxy hands streams to the player over loopback.
@@ -87,6 +99,13 @@ func (p *Proxy) Base() string { return p.base }
 
 // Close stops the proxy and every stream it serves.
 func (p *Proxy) Close() error {
+	p.mu.Lock()
+	streams := p.streams
+	p.streams = map[string]*Stream{}
+	p.mu.Unlock()
+	for _, s := range streams {
+		stopHLS(s)
+	}
 	return p.srv.Close()
 }
 
@@ -106,6 +125,25 @@ func (p *Proxy) Open(s Stream) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
+
+	// An MP4 with its moov at the end can't be streamed by the system's
+	// player over HTTP: it waits for the whole file. Remux it to HLS as it
+	// comes, which the player begins on at once.
+	if s.Type == "mp4" && s.FFmpeg != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		fast := p.isFaststart(ctx, &s, s.URL)
+		cancel()
+		if !fast {
+			if job, err := p.startHLS(&s); err == nil {
+				s.hls = job
+				p.mu.Lock()
+				p.streams[token] = &s
+				p.mu.Unlock()
+				return p.base + "/s/" + token + "/hls/index.m3u8", token, nil
+			}
+		}
+	}
+
 	p.mu.Lock()
 	p.streams[token] = &s
 	p.mu.Unlock()
@@ -120,8 +158,19 @@ func (p *Proxy) Open(s Stream) (string, string, error) {
 // Forget stops serving a stream.
 func (p *Proxy) Forget(token string) {
 	p.mu.Lock()
+	s := p.streams[token]
 	delete(p.streams, token)
 	p.mu.Unlock()
+	stopHLS(s)
+}
+
+func stopHLS(s *Stream) {
+	if s == nil || s.hls == nil {
+		return
+	}
+	s.hls.cancel()
+	_ = s.hls.cmd.Wait()
+	_ = os.RemoveAll(s.hls.dir)
 }
 
 func (p *Proxy) stream(token string) *Stream {
@@ -140,6 +189,10 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	s := p.stream(token)
 	if s == nil {
 		http.NotFound(w, r)
+		return
+	}
+	if kind == "hls" {
+		p.serveHLS(w, r, s, enc)
 		return
 	}
 	raw, err := decode(enc)
@@ -227,13 +280,7 @@ func (p *Proxy) serveBytes(w http.ResponseWriter, r *http.Request, s *Stream, ra
 		return
 	}
 
-	// An MP4 with its moov at the end stalls the system's player over
-	// HTTP: it needs the whole file before the first picture. Remuxing it
-	// to a fragmented one, as a stream, lets the player begin at once.
-	if s.Type == "mp4" && s.FFmpeg != "" && !p.isFaststart(ctx, s, raw) {
-		p.serveRemux(w, r, s, raw)
-		return
-	}
+	// An MP4 with its moov at the end is HLS here, from Open.
 
 	if key != "" {
 		data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
@@ -294,47 +341,92 @@ func (p *Proxy) isFaststart(ctx context.Context, s *Stream, raw string) bool {
 	if err != nil {
 		return true
 	}
-	v = bytes.Contains(data, []byte("moov"))
+	v = moovBeforeMdat(data)
 	p.mu.Lock()
 	p.faststart[raw] = v
 	p.mu.Unlock()
 	return v
 }
 
-// serveRemux streams a fragmented MP4 made of the file as it comes, so the
-// player begins without waiting for a moov at the end.
-func (p *Proxy) serveRemux(w http.ResponseWriter, r *http.Request, s *Stream, raw string) {
+// moovBeforeMdat says whether the moov comes before the mdat, as a file the
+// player can stream over HTTP has it.
+func moovBeforeMdat(data []byte) bool {
+	moov := bytes.Index(data, []byte("moov"))
+	if moov < 0 {
+		return false
+	}
+	mdat := bytes.Index(data, []byte("mdat"))
+	if mdat < 0 {
+		return true
+	}
+	return moov < mdat
+}
+
+// startHLS makes the file's parts as HLS, which the player streams from a
+// playlist that grows as they come.
+func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
+	dir, err := os.MkdirTemp("", "mygo-video-hls-")
+	if err != nil {
+		return nil, err
+	}
 	args := []string{"-loglevel", "error", "-rw_timeout", "15000000"}
 	if h := headerLines(s.Headers); h != "" {
 		args = append(args, "-headers", h)
 	}
 	args = append(args,
-		"-i", raw,
+		"-i", s.URL,
 		"-c", "copy",
-		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
-		"-f", "mp4",
-		"pipe:1",
+		"-f", "hls",
+		"-hls_time", "4",
+		"-hls_playlist_type", "event",
+		"-hls_segment_type", "fmp4",
+		"-hls_fmp4_init_filename", "init.mp4",
+		"-hls_segment_filename", filepath.Join(dir, "seg%05d.m4s"),
+		"-hls_flags", "independent_segments",
+		filepath.Join(dir, "index.m3u8"),
 	)
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, s.FFmpeg, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
 	if err := cmd.Start(); err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		cancel()
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	return &hlsJob{dir: dir, cancel: cancel, cmd: cmd}, nil
+}
+
+// serveHLS serves a part of the remux, waiting a while for the playlist to
+// be written before the player asks for it.
+func (p *Proxy) serveHLS(w http.ResponseWriter, r *http.Request, s *Stream, name string) {
+	if s.hls == nil {
+		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "video/mp4")
-	w.WriteHeader(http.StatusOK)
-	if _, err := io.Copy(w, stdout); err != nil {
-		cancel()
+	name = filepath.Base(name)
+	path := filepath.Join(s.hls.dir, name)
+	if strings.HasSuffix(name, ".m3u8") {
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			if _, err := os.Stat(path); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				http.Error(w, "the playlist isn't ready", http.StatusGatewayTimeout)
+				return
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	} else {
+		w.Header().Set("Content-Type", "video/mp4")
 	}
-	_ = cmd.Wait()
+	http.ServeFile(w, r, path)
 }
 
 func headerLines(h map[string]string) string {

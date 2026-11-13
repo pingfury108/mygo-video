@@ -7,8 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const referer = "https://example.com/watch"
@@ -257,4 +260,64 @@ func encrypt(t *testing.T, key, iv, plain []byte) []byte {
 	out := make([]byte, len(padded))
 	cipher.NewCBCEncrypter(block, iv).CryptBlocks(out, padded)
 	return out
+}
+
+// An MP4 whose moov is at its end is remuxed to HLS that the player can
+// stream from.
+func TestHLSRemux(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "clip.mp4")
+	cmd := exec.Command(ffmpeg, "-y", "-loglevel", "error",
+		"-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=25",
+		"-f", "lavfi", "-i", "sine=duration=2",
+		"-c:v", "libx264", "-c:a", "aac", "-shortest", src)
+	if err := cmd.Run(); err != nil {
+		t.Skipf("can't make a clip: %v", err)
+	}
+	srv := httptest.NewServer(http.FileServer(http.Dir(dir)))
+	defer srv.Close()
+
+	p, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	u, _, err := p.Open(Stream{URL: srv.URL + "/clip.mp4", Type: "mp4", FFmpeg: ffmpeg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(u, "/hls/index.m3u8") {
+		t.Fatalf("url %q, want HLS", u)
+	}
+	deadline := time.Now().Add(25 * time.Second)
+	for {
+		resp, err := http.Get(u)
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && strings.Contains(string(body), "#EXTM3U") {
+				if !strings.Contains(string(body), ".m4s") {
+					t.Fatalf("no parts: %s", body)
+				}
+				base := strings.TrimSuffix(u, "index.m3u8")
+				init, err := http.Get(base + "init.mp4")
+				if err != nil {
+					t.Fatal(err)
+				}
+				init.Body.Close()
+				if init.StatusCode != http.StatusOK {
+					t.Fatalf("init %d", init.StatusCode)
+				}
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("playlist did not come")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
