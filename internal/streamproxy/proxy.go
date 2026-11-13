@@ -47,6 +47,9 @@ type Stream struct {
 	// into HLS, which the player streams; empty leaves such files to it,
 	// which waits for the whole of them.
 	FFmpeg string
+	// Start is where the stream begins, for a seek that restarts the
+	// remux at the place asked for.
+	Start time.Duration
 
 	// hls is the remux running for this stream, if any.
 	hls *hlsJob
@@ -372,6 +375,9 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	args := []string{"-loglevel", "error", "-rw_timeout", "15000000"}
 	if h := headerLines(s.Headers); h != "" {
 		args = append(args, "-headers", h)
+	}
+	if s.Start > 0 {
+		args = append(args, "-ss", fmt.Sprintf("%.3f", s.Start.Seconds()))
 	}
 	args = append(args,
 		"-i", s.URL,

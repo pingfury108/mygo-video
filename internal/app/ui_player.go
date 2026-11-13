@@ -106,10 +106,10 @@ func (a *app) playerControls(c *ui.Context) {
 		Opacity(shown).IgnoreInput(a.uiHidden)
 	bar.Children(func() {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, media.HumanDuration(pl.Position().Milliseconds())).
+			ui.Text(c, media.HumanDuration(a.playhead().Milliseconds())).
 				FontSize(11).TextColor(white).Width(54).TextAlign(ui.End)
 			a.seekBar(c)
-			ui.Text(c, media.HumanDuration(pl.Duration().Milliseconds())).
+			ui.Text(c, media.HumanDuration(a.playLength().Milliseconds())).
 				FontSize(11).TextColor(white).Width(54)
 		})
 		ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
@@ -202,19 +202,71 @@ func playerButton(c *ui.Context, icon *ui.SVG, size float32, label string, activ
 	return b
 }
 
-func (a *app) seekBar(c *ui.Context) {
+// playhead is where the video plays, from the start of the file: a WebDAV
+// remux starts where it was asked to.
+func (a *app) playhead() time.Duration {
+	if a.player == nil {
+		return 0
+	}
+	return a.webdavBase + a.player.Position()
+}
+
+// playLength is how long the video is, which ffprobe tells for a remux.
+func (a *app) playLength() time.Duration {
+	if a.webdavDuration > 0 {
+		return a.webdavDuration
+	}
+	if a.player != nil {
+		return a.player.Duration()
+	}
+	return 0
+}
+
+// seekTo moves to d, the whole file's time: a remux starts over there.
+func (a *app) seekTo(d time.Duration) {
 	pl := a.player
-	dur := pl.Duration().Seconds()
+	if pl == nil {
+		return
+	}
+	if d < 0 {
+		d = 0
+	}
+	if length := a.playLength(); length > 0 && d > length-500*time.Millisecond {
+		d = length - time.Second
+		if d < 0 {
+			d = 0
+		}
+	}
+	if a.webdavHLS {
+		a.seekWebDAV(d)
+		return
+	}
+	pl.Seek(d)
+	a.seek = d.Seconds()
+	a.seekedAt = time.Now()
+	a.uiShown = time.Now()
+	a.invalidate()
+}
+
+func (a *app) seekWebDAV(d time.Duration) {
+	if a.playing.ID == "" {
+		return
+	}
+	a.playWebDAVAt(a.playing, d)
+}
+
+func (a *app) seekBar(c *ui.Context) {
+	dur := a.playLength().Seconds()
 	if dur <= 0 {
 		dur = 1
 	}
 	if time.Since(a.seekedAt) > 800*time.Millisecond {
-		a.seek = pl.Position().Seconds()
+		a.seek = a.playhead().Seconds()
 	}
 	slider := ui.Slider(c, &a.seek, 0, dur).Grow(1)
 	if slider.Changed() {
 		a.seekedAt = time.Now()
-		pl.Seek(time.Duration(a.seek * float64(time.Second)))
+		a.seekTo(time.Duration(a.seek * float64(time.Second)))
 		a.uiShown = time.Now()
 	}
 }
@@ -323,6 +375,10 @@ func (a *app) togglePlay() {
 		pl.Pause()
 		a.saveProgress()
 	case pl.Ended():
+		if a.webdavHLS {
+			a.seekWebDAV(0)
+			return
+		}
 		pl.Seek(0)
 		pl.Play()
 		a.seek = 0
@@ -336,25 +392,10 @@ func (a *app) togglePlay() {
 }
 
 func (a *app) seekBy(d time.Duration) {
-	pl := a.player
-	if pl == nil {
+	if a.player == nil {
 		return
 	}
-	pos := pl.Position() + d
-	if pos < 0 {
-		pos = 0
-	}
-	if dur := pl.Duration(); dur > 0 && pos > dur-500*time.Millisecond {
-		pos = dur - time.Second
-		if pos < 0 {
-			pos = 0
-		}
-	}
-	pl.Seek(pos)
-	a.seek = pos.Seconds()
-	a.seekedAt = time.Now()
-	a.uiShown = time.Now()
-	a.invalidate()
+	a.seekTo(a.playhead() + d)
 }
 
 func (a *app) toggleSubtitles() {

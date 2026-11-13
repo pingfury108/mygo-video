@@ -128,6 +128,12 @@ type app struct {
 	webdavScroll    ui.ScrollState
 	webdavDirs      map[string]webdavDir
 	webdavIndexAt   time.Time
+	// webdavHLS says the video plays as HLS remuxed here, from
+	// webdavBase on, and its length is what ffprobe said.
+	webdavHLS        bool
+	webdavBase       time.Duration
+	webdavDuration   time.Duration
+	webdavDurationID string
 
 	// The scan of every folder below the one showing.
 	webdavAll      bool
@@ -564,6 +570,12 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 // beginPlayback makes p the video showing, from where the listener stopped
 // unless asked to start over.
 func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
+	if it.Source != "webdav" {
+		a.webdavHLS = false
+		a.webdavBase = 0
+		a.webdavDuration = 0
+		a.webdavDurationID = ""
+	}
 	a.player = p
 	a.playing = it
 	a.fresh = fromStart
@@ -619,8 +631,8 @@ func (a *app) saveProgress() {
 	if !p.Ready() {
 		return
 	}
-	pos := p.Position().Milliseconds()
-	dur := p.Duration().Milliseconds()
+	pos := a.playhead().Milliseconds()
+	dur := a.playLength().Milliseconds()
 	done := dur > 0 && pos >= dur-1500
 	prev, ok := a.store.Progress(a.playing.ID)
 	if ok && prev.Started() && !a.fresh && pos < 1000 && !done {

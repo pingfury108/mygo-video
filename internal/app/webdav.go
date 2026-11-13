@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"os/exec"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -155,13 +157,27 @@ func (a *app) webdavItemsFrom(entries []webdav.Entry) []media.Item {
 	return items
 }
 
-// playWebDAV plays a file of the server through the proxy, with the
-// authorization the server asks for.
 // playWebDAV plays a file of the server through the proxy: with the
-// authorization it asks for, and as a fragmented MP4 when the file's moov
+// authorization it asks for, and as HLS remuxed here when the file's moov
 // is at its end, which the player streams.
 func (a *app) playWebDAV(it media.Item, fromStart bool) {
+	start := time.Duration(0)
+	if !fromStart {
+		if prog, ok := a.store.Progress(it.ID); ok && prog.Started() {
+			start = time.Duration(prog.Position) * time.Millisecond
+		}
+	}
+	a.playWebDAVAt(it, start)
+}
+
+// playWebDAVAt plays a video of the server from d: a remux that begins
+// there, for the files the player can't seek in itself.
+func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	a.closePlayer()
+	if a.webdavDurationID != it.ID {
+		a.webdavDuration = 0
+		a.webdavDurationID = it.ID
+	}
 	kind := "mp4"
 	if strings.HasSuffix(strings.ToLower(it.RemoteID), ".m3u8") {
 		kind = "hls"
@@ -171,11 +187,14 @@ func (a *app) playWebDAV(it media.Item, fromStart bool) {
 		Type:    kind,
 		Headers: a.webdavAuth(),
 		FFmpeg:  a.thumbTool,
+		Start:   d,
 	})
 	if err != nil {
 		a.say("%v", err)
 		return
 	}
+	a.webdavHLS = strings.Contains(url, "/hls/")
+	a.webdavBase = d
 	player, err := video.OpenURL(url)
 	if err != nil {
 		a.proxy.Forget(token)
@@ -185,7 +204,47 @@ func (a *app) playWebDAV(it media.Item, fromStart bool) {
 	a.proxyToken = token
 	a.subs = nil
 	a.subsOn = false
-	a.beginPlayback(it, player, fromStart)
+	a.beginPlayback(it, player, true)
+	a.probeWebDAVDuration(it)
+}
+
+// probeWebDAVDuration asks ffprobe how long the video is: an HLS remux
+// tells the player only what it has made so far.
+func (a *app) probeWebDAVDuration(it media.Item) {
+	probe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		return
+	}
+	args := []string{"-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"}
+	if h := headerArg(a.webdavAuth()); h != "" {
+		args = append(args, "-headers", h)
+	}
+	args = append(args, it.RemoteID)
+	go func() {
+		out, err := exec.Command(probe, args...).Output()
+		if err != nil {
+			return
+		}
+		sec, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+		if err != nil || sec <= 0 {
+			return
+		}
+		mygo.RunOnMain(func() {
+			a.webdavDuration = time.Duration(sec * float64(time.Second))
+			a.invalidate()
+		})
+	}()
+}
+
+func headerArg(h map[string]string) string {
+	var b strings.Builder
+	for k, v := range h {
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.WriteString(v)
+		b.WriteString("\r\n")
+	}
+	return b.String()
 }
 
 // webdavHome is the WebDAV source's page: the folders of where it is, and
