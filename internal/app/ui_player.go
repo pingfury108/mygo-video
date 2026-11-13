@@ -38,29 +38,22 @@ func (a *app) playerPage(c *ui.Context) {
 	} else if !a.uiHidden && time.Since(a.uiShown) > hideAfter {
 		a.uiHidden = true
 	}
-	// The controls come back at the edges of the window, where the pointer
-	// goes to leave it or to find them.
-	if a.pointerIn {
-		_, h := c.Size()
-		if a.pointerY < 90 || a.pointerY > h-130 {
+
+	root := ui.Box(c).Fill().Background(ui.Hex("#000000"))
+	// Any move brings the controls back; at the edges of the window they
+	// stay, where the pointer goes to leave it or to find them.
+	if x, y, over := root.PointerPosition(); over {
+		if !a.pointerIn || x != a.pointerX || y != a.pointerY {
+			a.uiShown = time.Now()
+			a.uiHidden = false
+		}
+		a.pointerX, a.pointerY = x, y
+		a.pointerIn = true
+		if _, h := c.Size(); y < 90 || y > h-130 {
 			a.uiShown = time.Now()
 			a.uiHidden = false
 		}
 	}
-
-	root := ui.Box(c).Fill().Background(ui.Hex("#000000"))
-	root.ObserveInput(func(ev ui.InputEvent) {
-		switch ev.Kind {
-		case ui.InputPointerMove:
-			a.pointerX, a.pointerY = ev.X, ev.Y
-			a.pointerIn = true
-			a.uiShown = time.Now()
-			a.uiHidden = false
-		case ui.InputScroll:
-			a.uiShown = time.Now()
-			a.uiHidden = false
-		}
-	})
 	root.OnClick(a.togglePlay)
 	root.Children(func() {
 		ui.Video(c, pl).Fill().Fit(ui.Contain)
