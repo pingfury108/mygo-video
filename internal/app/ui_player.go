@@ -103,7 +103,7 @@ func (a *app) playerTop(c *ui.Context) {
 				TextColor(ui.RGBA(255, 255, 255, 0.5)).SingleLine()
 		})
 		ui.Box(c).Grow(1)
-		ui.Text(c, "本地").FontSize(10.5).TextColor(ui.RGBA(255, 255, 255, 0.66)).
+		ui.Text(c, a.playingSourceName()).FontSize(10.5).TextColor(ui.RGBA(255, 255, 255, 0.66)).
 			Padding(3, 9).Radius(20).Background(ui.RGBA(255, 255, 255, 0.1))
 	})
 }
@@ -446,4 +446,20 @@ func (a *app) toggleFullScreen() {
 
 func rateLabel(r float64) string {
 	return strconv.FormatFloat(r, 'f', -1, 64) + "×"
+}
+
+// playingSourceName is where the video playing came from.
+func (a *app) playingSourceName() string {
+	switch a.playing.Source {
+	case "":
+		return "本地"
+	case "webdav":
+		return "WebDAV"
+	case "iptv":
+		return "IPTV"
+	}
+	if pe := a.pluginEntryByID(a.playing.Source); pe != nil {
+		return pe.man.Name
+	}
+	return a.playing.Source
 }

@@ -699,3 +699,13 @@ func (a *app) signOutPlugin(p *plugin.Plugin) {
 		})
 	}()
 }
+
+// pluginEntryByID is the plugin with that id, on or off.
+func (a *app) pluginEntryByID(id string) *pluginEntry {
+	for _, pe := range a.plugins {
+		if pe.man.ID == id {
+			return pe
+		}
+	}
+	return nil
+}

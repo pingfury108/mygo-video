@@ -131,11 +131,13 @@ func (a *app) iptvHome(c *ui.Context) {
 
 	ui.Column(c).Grow(1).Children(func() {
 		if len(a.iptvGroups) > 1 {
-			ui.Row(c).PaddingX(32).Gap(6).Children(func() {
-				a.iptvChip(c, "全部", "")
-				for _, g := range a.iptvGroups {
-					a.iptvChip(c, g, g)
-				}
+			ui.ScrollHorizontal(c).Height(36).Children(func() {
+				ui.Row(c).PaddingX(32).Gap(6).Children(func() {
+					a.iptvChip(c, "全部", "")
+					for _, g := range a.iptvGroups {
+						a.iptvChip(c, g, g)
+					}
+				})
 			})
 		}
 		list := a.iptvShowing()
