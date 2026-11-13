@@ -186,7 +186,6 @@ func (a *app) playerControls(c *ui.Context) {
 			if pl.Ended() {
 				ui.Text(c, "已看完").FontSize(11.5).TextColor(white).PaddingX(8)
 			}
-			ghostButton(c, "返回详情", iconBack, a.leavePlayer)
 		})
 	})
 }
