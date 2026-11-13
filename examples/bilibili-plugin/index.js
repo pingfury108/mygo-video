@@ -334,20 +334,25 @@ export async function history() {
 export async function favorites() {
   const uid = await mid();
   const folders = await api("/x/v3/fav/folder/created/list-all?up_mid=" + uid);
-  const first = folders.list && folders.list[0];
-  if (!first) return { title: "收藏", sections: [] };
-  const d = await api(
-    "/x/v3/fav/resource/list?media_id=" + first.id + "&ps=30&pn=1",
-  );
-  const videos = (d.medias || []).map((v) => ({
-    id: v.bvid,
-    name: v.title,
-    poster: pic(v.cover),
-    overview: v.intro || (v.upper && v.upper.name ? "UP主：" + v.upper.name : ""),
-    duration: (v.duration || 0) * 1000,
-    url: "https://www.bilibili.com/video/" + v.bvid,
-  }));
-  return { title: "收藏", sections: [{ title: first.title, videos }] };
+  const sections = [];
+  for (const f of (folders.list || []).slice(0, 4)) {
+    const d = await api(
+      "/x/v3/fav/resource/list?media_id=" + f.id + "&ps=20&pn=1",
+    );
+    sections.push({
+      title: f.title,
+      videos: (d.medias || []).map((v) => ({
+        id: v.bvid,
+        name: v.title,
+        poster: pic(v.cover),
+        overview:
+          v.intro || (v.upper && v.upper.name ? "UP主：" + v.upper.name : ""),
+        duration: (v.duration || 0) * 1000,
+        url: "https://www.bilibili.com/video/" + v.bvid,
+      })),
+    });
+  }
+  return { title: "收藏", sections };
 }
 
 export async function watchLater() {

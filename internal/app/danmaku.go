@@ -43,7 +43,7 @@ func (a *app) danmakuLayer(c *ui.Context) {
 		return
 	}
 	pos := a.playhead().Milliseconds()
-	width, _ := c.Size()
+	width, height := c.Size()
 	ui.Box(c).Fill().IgnoreInput(true).Children(func() {
 		start := sort.Search(len(a.danmaku), func(i int) bool {
 			return a.danmaku[i].Time > pos-int64(danmakuLife/time.Millisecond)
@@ -55,12 +55,26 @@ func (a *app) danmakuLayer(c *ui.Context) {
 			if age < 0 || age > danmakuLife.Milliseconds() {
 				continue
 			}
+			// 4 stays at the bottom, 5 at the top, for a shorter while;
+			// the rest fly across.
+			fixed := cue.Mode == 4 || cue.Mode == 5
+			if fixed && age > 4000 {
+				continue
+			}
 			x := float64(width) - float64(age)*0.11
+			top := float32(56 + (i%12)*26)
+			if fixed {
+				x = float64(width) * 0.34
+				if cue.Mode == 4 {
+					top = height - float32(110+(i%3)*26)
+				} else {
+					top = 56 + float32((i%3)*26)
+				}
+			}
 			if x < -500 {
 				continue
 			}
 			shown++
-			top := float32(56 + (i%12)*26)
 			color := ui.RGBA(255, 255, 255, 0.92)
 			if cue.Color != "" && cue.Color != "#ffffff" {
 				color = ui.Hex(cue.Color)
