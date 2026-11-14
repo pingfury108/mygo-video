@@ -65,10 +65,9 @@ type app struct {
 	thumbBusy map[string]bool
 	thumbUsed map[string]time.Time
 
-	// ffmpeg and ffprobe are the programs the app uses, wherever they are:
-	// the listener's choice, the app's own resources, or the PATH.
+	// ffmpeg is the program the app uses, wherever it is: the listener's
+	// choice, the app's own resources, or the PATH.
 	ffmpeg  string
-	ffprobe string
 	toolBin string
 	// thumbSem keeps ffmpeg jobs to a couple at a time, for a server that
 	// would feel dozens of them.
@@ -163,7 +162,7 @@ type app struct {
 	webdavDirs      map[string]webdavDir
 	webdavIndexAt   time.Time
 	// webdavHLS says the video plays as HLS remuxed here, from
-	// webdavBase on, and its length is what ffprobe said.
+	// webdavBase on, and its length is what ffmpeg said.
 	webdavHLS        bool
 	webdavBase       time.Duration
 	webdavDuration   time.Duration
@@ -270,7 +269,6 @@ func (a *app) start() {
 	}
 	tools := st.Tools()
 	a.ffmpeg = ffbin.Locate("ffmpeg", tools.FFmpeg, a.toolBin)
-	a.ffprobe = ffbin.Locate("ffprobe", tools.FFprobe, a.toolBin)
 	a.thumbs = map[string]*ui.Bitmap{}
 	a.thumbBusy = map[string]bool{}
 	a.thumbUsed = map[string]time.Time{}

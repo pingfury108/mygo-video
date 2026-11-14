@@ -20,10 +20,9 @@ func (a *app) settingsPage(c *ui.Context) {
 	ui.Scroll(c).Grow(1).TrackScroll(&a.settingsScroll).Children(func() {
 		ui.Column(c).Padding(8, 32, 40, 32).Gap(16).MaxWidth(820).Children(func() {
 			settingsCard(c, "工具", func() {
-				ui.Text(c, "ffmpeg 用来抽帧、把 WebDAV 的大文件转成 HLS、合成 1080P；ffprobe 用来看时长。没有也能播放本地视频。").
+				ui.Text(c, "ffmpeg 用来抽帧、把 WebDAV 的大文件转成 HLS、合成 1080P。没有也能播放本地视频。").
 					FontSize(11.5).TextColor(p.faint)
 				a.toolRow(c, "ffmpeg", a.ffmpeg)
-				a.toolRow(c, "ffprobe", a.ffprobe)
 				ui.Row(c).Gap(8).Children(func() {
 					ghostButton(c, "重新检测", iconRefresh, a.detectTools)
 				})
@@ -80,11 +79,10 @@ func (a *app) chooseTool(name string) {
 	}()
 }
 
-// detectTools looks for ffmpeg and ffprobe again, and tells the plugins.
+// detectTools looks for ffmpeg again, and tells the plugins.
 func (a *app) detectTools() {
 	tools := a.store.Tools()
 	a.ffmpeg = ffbin.Locate("ffmpeg", tools.FFmpeg, a.toolBin)
-	a.ffprobe = ffbin.Locate("ffprobe", tools.FFprobe, a.toolBin)
 	for _, pe := range a.plugins {
 		if pe.p != nil {
 			pe.p.SetFFmpeg(a.ffmpeg != "")

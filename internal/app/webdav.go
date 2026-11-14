@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path"
 	"sort"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -208,25 +207,22 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	a.probeWebDAVDuration(it)
 }
 
-// probeWebDAVDuration asks ffprobe how long the video is: an HLS remux
+// probeWebDAVDuration asks ffmpeg how long the video is: an HLS remux
 // tells the player only what it has made so far.
 func (a *app) probeWebDAVDuration(it media.Item) {
-	probe := a.ffprobe
-	if probe == "" {
+	ff := a.ffmpeg
+	if ff == "" {
 		return
 	}
-	args := []string{"-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"}
+	args := []string{"-hide_banner", "-rw_timeout", "15000000"}
 	if h := headerArg(a.webdavAuth()); h != "" {
 		args = append(args, "-headers", h)
 	}
-	args = append(args, it.RemoteID)
+	args = append(args, "-i", it.RemoteID)
 	go func() {
-		out, err := exec.Command(probe, args...).Output()
-		if err != nil {
-			return
-		}
-		sec, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-		if err != nil || sec <= 0 {
+		out, _ := exec.Command(ff, args...).CombinedOutput()
+		sec, ok := ffmpegDuration(string(out))
+		if !ok || sec <= 0 {
 			return
 		}
 		mygo.RunOnMain(func() {
@@ -234,6 +230,25 @@ func (a *app) probeWebDAVDuration(it media.Item) {
 			a.invalidate()
 		})
 	}()
+}
+
+// ffmpegDuration reads the length ffmpeg prints of its input, as
+// "Duration: 00:44:56.65".
+func ffmpegDuration(out string) (float64, bool) {
+	i := strings.Index(out, "Duration: ")
+	if i < 0 {
+		return 0, false
+	}
+	s := out[i+len("Duration: "):]
+	if len(s) < 11 {
+		return 0, false
+	}
+	var h, m int
+	var sec float64
+	if _, err := fmt.Sscanf(s[:11], "%d:%d:%f", &h, &m, &sec); err != nil {
+		return 0, false
+	}
+	return float64(h*3600+m*60) + sec, true
 }
 
 func headerArg(h map[string]string) string {

@@ -34,10 +34,9 @@ type Data struct {
 	Tools   Tools                  `json:"tools,omitempty"`
 }
 
-// Tools are the programs the listener named for ffmpeg and ffprobe.
+// Tools are the programs the listener named.
 type Tools struct {
-	FFmpeg  string `json:"ffmpeg,omitempty"`
-	FFprobe string `json:"ffprobe,omitempty"`
+	FFmpeg string `json:"ffmpeg,omitempty"`
 }
 
 // SourceID is the source last showing. Files from before plugins could be
@@ -283,15 +282,10 @@ func (s *Store) Tools() Tools {
 	return s.data.Tools
 }
 
-// SetTool keeps where a program is, "ffmpeg" or "ffprobe".
+// SetTool keeps where ffmpeg is.
 func (s *Store) SetTool(name, path string) {
 	s.mu.Lock()
-	switch name {
-	case "ffmpeg":
-		s.data.Tools.FFmpeg = path
-	case "ffprobe":
-		s.data.Tools.FFprobe = path
-	}
+	s.data.Tools.FFmpeg = path
 	s.mu.Unlock()
 	s.Save()
 }

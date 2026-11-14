@@ -254,7 +254,7 @@ func (a *app) playhead() time.Duration {
 	return a.webdavBase + a.player.Position()
 }
 
-// playLength is how long the video is, which ffprobe tells for a remux.
+// playLength is how long the video is, which ffmpeg tells for a remux.
 func (a *app) playLength() time.Duration {
 	if a.webdavDuration > 0 {
 		return a.webdavDuration
