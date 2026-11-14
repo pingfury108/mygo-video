@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -63,6 +64,7 @@ type hlsJob struct {
 	dir    string
 	cancel context.CancelFunc
 	cmd    *exec.Cmd
+	stderr bytes.Buffer
 }
 
 // Proxy hands streams to the player over loopback.
@@ -190,6 +192,9 @@ func stopHLS(s *Stream) {
 	}
 	s.hls.cancel()
 	_ = s.hls.cmd.Wait()
+	if msg := strings.TrimSpace(s.hls.stderr.String()); msg != "" {
+		log.Printf("streamproxy: %s", msg)
+	}
 	_ = os.RemoveAll(s.hls.dir)
 }
 
@@ -417,15 +422,16 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		filepath.Join(dir, "index.m3u8"),
 	)
 	ctx, cancel := context.WithCancel(context.Background())
+	job := &hlsJob{dir: dir, cancel: cancel}
 	cmd := exec.CommandContext(ctx, s.FFmpeg, args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	job.cmd = cmd
+	cmd.Stderr = &job.stderr
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
-	return &hlsJob{dir: dir, cancel: cancel, cmd: cmd}, nil
+	return job, nil
 }
 
 // serveHLS serves a part of the remux, waiting a while for the playlist to

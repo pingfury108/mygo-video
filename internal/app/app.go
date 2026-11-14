@@ -773,6 +773,16 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 	} else {
 		a.loadDanmaku(it)
 	}
+	go func() {
+		time.Sleep(20 * time.Second)
+		mygo.RunOnMain(func() {
+			if a.player == nil || a.playing.ID != it.ID || a.player.Ready() {
+				return
+			}
+			a.say("这个流打不开，地址可能已过期")
+			a.invalidate()
+		})
+	}()
 }
 
 // beginPlayback makes p the video showing, from where the listener stopped
