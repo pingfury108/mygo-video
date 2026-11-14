@@ -143,7 +143,7 @@ func (a *app) pluginHome(c *ui.Context) {
 					for _, v := range videos {
 						items = append(items, itemFromVideo(id, v))
 					}
-					a.cardRow(c, items, 216)
+					a.pluginGrid(c, items)
 				})
 			}
 		})
@@ -188,6 +188,20 @@ func (a *app) continueHero(c *ui.Context, it media.Item) {
 			})
 		})
 	})
+}
+
+// pluginGrid lays a plugin's videos out in rows, filling the width, so a
+// page of them takes the room it has.
+func (a *app) pluginGrid(c *ui.Context, items []media.Item) {
+	const cols = 4
+	for i := 0; i < len(items); i += cols {
+		end := min(i+cols, len(items))
+		ui.Row(c).Gap(14).Children(func() {
+			for _, it := range items[i:end] {
+				a.videoCard(c, it, 216)
+			}
+		})
+	}
 }
 
 // pluginTabChip is one of a plugin's pages: its home, or its library.
