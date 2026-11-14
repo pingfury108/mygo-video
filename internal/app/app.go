@@ -739,11 +739,16 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 		}
 	}
 	a.closePlayer()
+	if (kind == "dash" || kind == "flv") && a.ffmpeg == "" {
+		a.say("这个流需要 ffmpeg：设置 → 工具")
+		return
+	}
 	url, token, err := a.proxy.Open(streamproxy.Stream{
 		URL:     videoURL,
 		Type:    kind,
 		Audio:   audio,
 		Headers: pb.Headers,
+		FFmpeg:  a.ffmpeg,
 	})
 	if err != nil {
 		a.say("%v", err)

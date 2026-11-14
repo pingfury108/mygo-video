@@ -137,7 +137,7 @@ func (p *Proxy) Open(s Stream) (string, string, error) {
 	// comes, which the player begins on at once.
 	if s.Audio != "" || s.Type == "dash" || s.Type == "flv" {
 		if s.FFmpeg == "" {
-			return "", "", errors.New("streamproxy: a dash stream needs ffmpeg")
+			return "", "", errors.New("streamproxy: this stream needs ffmpeg")
 		}
 		job, err := p.startHLS(&s)
 		if err != nil {
