@@ -125,6 +125,11 @@ func (a *app) liveDanmakuHandler(p *plugin.Plugin) func(plugin.Cue) {
 				return
 			}
 			cue.Time = a.playhead().Milliseconds()
+			if len(a.danmaku) < 5 {
+				a.diag("live cue mode=%d text=%q", cue.Mode, cue.Text)
+			}
+			// A live chat scrolls; it has no comments fixed to an edge.
+			cue.Mode = 0
 			a.danmaku = append(a.danmaku, cue)
 			if len(a.danmaku) > 300 {
 				a.danmaku = a.danmaku[len(a.danmaku)-300:]
