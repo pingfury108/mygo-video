@@ -399,6 +399,12 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		args = append(args, "-ss", fmt.Sprintf("%.3f", s.Start.Seconds()))
 	}
 	// Each input takes the headers of its own request.
+	// A live stream starts at once: no probing pause, no input buffer,
+	// and shorter parts, so the player has one to begin on.
+	live := s.Type == "flv"
+	if live {
+		args = append(args, "-fflags", "nobuffer", "-analyzeduration", "0", "-probesize", "524288")
+	}
 	addInput := func(u string) {
 		if h := headerLines(s.Headers); h != "" {
 			args = append(args, "-headers", h)
@@ -410,10 +416,14 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		addInput(s.Audio)
 		args = append(args, "-map", "0:v:0", "-map", "1:a:0")
 	}
+	hlsTime := "4"
+	if live {
+		hlsTime = "2"
+	}
 	args = append(args,
 		"-c", "copy",
 		"-f", "hls",
-		"-hls_time", "4",
+		"-hls_time", hlsTime,
 		"-hls_playlist_type", "event",
 		"-hls_segment_type", "fmp4",
 		"-hls_fmp4_init_filename", "init.mp4",

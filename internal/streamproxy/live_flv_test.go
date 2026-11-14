@@ -40,13 +40,14 @@ func TestLiveFLV(t *testing.T) {
 	}
 	defer p.Forget(token)
 	deadline := time.Now().Add(30 * time.Second)
+	start := time.Now()
 	for {
 		resp, err := http.Get(url)
 		if err == nil {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK && strings.Contains(string(body), ".m4s") {
-				t.Logf("playlist ready: %d parts", strings.Count(string(body), ".m4s"))
+				t.Logf("playlist ready: %d parts in %v", strings.Count(string(body), ".m4s"), time.Since(start))
 				return
 			}
 		}

@@ -161,14 +161,17 @@ export async function play({ id, quality }) {
   const raw = String(id);
   if (raw.startsWith("live:")) {
     const room = raw.slice(5);
+    // The h5 address is an HLS playlist the player takes as it is; the web
+    // one is an FLV the proxy would have to remux first.
     const d = await liveGet(
-      "/room/v1/Room/playUrl?cid=" + room + "&platform=web&qn=10000",
+      "/room/v1/Room/playUrl?cid=" + room + "&platform=h5&qn=10000",
     );
     const seg = d.durl && d.durl[0] && d.durl[0].url;
     if (!seg) throw new Error("这个直播间暂时没有流");
+    const hls = /\.m3u8(\?|$)/.test(seg);
     return {
       url: seg,
-      type: "flv",
+      type: hls ? "hls" : "flv",
       live: true,
       quality: "原画",
       headers: liveHeaders(),
