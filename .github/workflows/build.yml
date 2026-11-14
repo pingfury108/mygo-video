@@ -85,6 +85,12 @@ jobs:
         if: matrix.target != 'windows-amd64'
         shell: bash
         run: chmod +x resources/${{ matrix.target }}/bin/*
+      - name: check the tool
+        shell: bash
+        run: |
+          bin="resources/${{ matrix.target }}/bin/ffmpeg"
+          if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi
+          "$bin" -version | head -1
       - name: build
         shell: bash
         run: go tool mygo build -platform ${{ matrix.platform }}
