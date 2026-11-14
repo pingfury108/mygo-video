@@ -27,11 +27,17 @@ type Data struct {
 	// while a new scan goes on.
 	Items     []media.Item `json:"items,omitempty"`
 	ScannedAt int64        `json:"scannedAt,omitempty"`
-	// Source is the one last showing, so the next run opens on it.
 	// Source is the one last showing, as "local", "webdav", "iptv" or
 	// "plugin:<id>", so enabling a plugin doesn't change what it names.
 	Source  SourceID               `json:"source,omitempty"`
 	Plugins map[string]PluginState `json:"plugins,omitempty"`
+	Tools   Tools                  `json:"tools,omitempty"`
+}
+
+// Tools are the programs the listener named for ffmpeg and ffprobe.
+type Tools struct {
+	FFmpeg  string `json:"ffmpeg,omitempty"`
+	FFprobe string `json:"ffprobe,omitempty"`
 }
 
 // SourceID is the source last showing. Files from before plugins could be
@@ -266,6 +272,26 @@ func (s *Store) Rate() float64 {
 func (s *Store) SetRate(r float64) {
 	s.mu.Lock()
 	s.data.Rate = r
+	s.mu.Unlock()
+	s.Save()
+}
+
+// Tools are the programs the listener named.
+func (s *Store) Tools() Tools {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.Tools
+}
+
+// SetTool keeps where a program is, "ffmpeg" or "ffprobe".
+func (s *Store) SetTool(name, path string) {
+	s.mu.Lock()
+	switch name {
+	case "ffmpeg":
+		s.data.Tools.FFmpeg = path
+	case "ffprobe":
+		s.data.Tools.FFprobe = path
+	}
 	s.mu.Unlock()
 	s.Save()
 }

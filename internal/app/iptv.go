@@ -214,7 +214,7 @@ func (a *app) playIPTV(ch iptv.Channel) {
 	url, token, err := a.proxy.Open(streamproxy.Stream{
 		URL:    ch.URL,
 		Type:   kind,
-		FFmpeg: a.thumbTool,
+		FFmpeg: a.ffmpeg,
 	})
 	if err != nil {
 		a.say("%v", err)

@@ -98,6 +98,18 @@ go tool mygo build    # 打包到 build/
 - **卸载**：展开卡片后两次确认，删除插件目录
 - **海报**：从 `poster` 字段加载网络图片，受 `permissions.network` 限制
 
+## ffmpeg 与 ffprobe
+
+抽帧、把 WebDAV 里 moov 在尾部的 MP4 转成 HLS、合成 B 站 1080P 的 DASH，都需要 ffmpeg；ffprobe 用来看时长。查找顺序：
+
+1. 设置 → 工具里选的路径
+2. 应用自带的 `resources/bin/`（打包版内嵌）
+3. `PATH`
+
+设置 → 工具会显示找到了哪个，也可以手动选。没有 ffmpeg 时仍能播放本地视频和 IPTV，只是没有缩略图、WebDAV 大文件播不了、B 站降到 720P。
+
+CI 会按平台下载 ffmpeg/ffprobe，放进 `resources/<platform>/bin/`，再由 `mygo build` 打进安装包（见 `.github/workflows/build.yml`）。
+
 ## 内置源
 
 内置源和插件一起在侧栏的「插件」页管理：本地视频、WebDAV、IPTV 三张卡，点开就能配置。设置页只留播放和关于。

@@ -48,6 +48,7 @@ func (a *app) loadPlugins() {
 				pe.err = err
 			} else {
 				pe.p = p
+				pe.p.SetFFmpeg(a.ffmpeg != "")
 			}
 		}
 		out = append(out, pe)
@@ -147,6 +148,7 @@ func (a *app) setPluginEnabled(pe *pluginEntry, on bool) {
 			}
 			pe.p = p
 			pe.err = nil
+			pe.p.SetFFmpeg(a.ffmpeg != "")
 			if h := a.readPluginCookie(id); h != "" {
 				pe.p.SetCookie(h)
 			}

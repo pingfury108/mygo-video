@@ -30,7 +30,7 @@ func (a *app) thumbnail(it media.Item) *ui.Bitmap {
 		a.thumbUsed[it.ID] = time.Now()
 		return b
 	}
-	if !a.thumbBusy[it.ID] && a.thumbTool != "" {
+	if !a.thumbBusy[it.ID] && a.ffmpeg != "" {
 		a.thumbBusy[it.ID] = true
 		go a.loadThumb(it)
 	}
@@ -47,13 +47,13 @@ func (a *app) loadThumb(it media.Item) {
 	switch {
 	case it.Source == "webdav":
 		if _, err := os.Stat(path); err != nil {
-			if err := thumb.MakeURL(context.Background(), a.thumbTool, it.RemoteID, a.webdavAuth(), path); err != nil {
+			if err := thumb.MakeURL(context.Background(), a.ffmpeg, it.RemoteID, a.webdavAuth(), path); err != nil {
 				log.Printf("thumb %s: %v", it.Name, err)
 			}
 		}
 	default:
 		if st, err := os.Stat(path); err != nil || st.ModTime().Before(it.ModTime) {
-			if err := thumb.Make(context.Background(), a.thumbTool, it.Path, path); err != nil {
+			if err := thumb.Make(context.Background(), a.ffmpeg, it.Path, path); err != nil {
 				log.Printf("thumb %s: %v", it.Name, err)
 			}
 		}
@@ -101,7 +101,7 @@ func (a *app) evictThumbs() {
 // pregenerateThumbs takes the frames missing, a few at a time, so cards find
 // them ready. It runs off the main thread.
 func (a *app) pregenerateThumbs(items []media.Item) {
-	if a.thumbTool == "" {
+	if a.ffmpeg == "" {
 		return
 	}
 	sem := make(chan struct{}, 3)
@@ -113,7 +113,7 @@ func (a *app) pregenerateThumbs(items []media.Item) {
 		sem <- struct{}{}
 		go func(it media.Item, path string) {
 			defer func() { <-sem }()
-			if err := thumb.Make(context.Background(), a.thumbTool, it.Path, path); err != nil {
+			if err := thumb.Make(context.Background(), a.ffmpeg, it.Path, path); err != nil {
 				log.Printf("thumb %s: %v", it.Name, err)
 			}
 		}(it, path)

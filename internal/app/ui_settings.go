@@ -4,6 +4,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"mygo-video/internal/ffbin"
 	"mygo-video/internal/plugin"
 )
 
@@ -18,6 +19,16 @@ func (a *app) settingsPage(c *ui.Context) {
 
 	ui.Scroll(c).Grow(1).TrackScroll(&a.settingsScroll).Children(func() {
 		ui.Column(c).Padding(8, 32, 40, 32).Gap(16).MaxWidth(820).Children(func() {
+			settingsCard(c, "工具", func() {
+				ui.Text(c, "ffmpeg 用来抽帧、把 WebDAV 的大文件转成 HLS、合成 1080P；ffprobe 用来看时长。没有也能播放本地视频。").
+					FontSize(11.5).TextColor(p.faint)
+				a.toolRow(c, "ffmpeg", a.ffmpeg)
+				a.toolRow(c, "ffprobe", a.ffprobe)
+				ui.Row(c).Gap(8).Children(func() {
+					ghostButton(c, "重新检测", iconRefresh, a.detectTools)
+				})
+			})
+
 			settingsCard(c, "播放", func() {
 				fact(c, "空格", "播放 / 暂停")
 				fact(c, "← →", "后退 / 快进 10 秒")
@@ -34,6 +45,57 @@ func (a *app) settingsPage(c *ui.Context) {
 			})
 		})
 	})
+}
+
+// toolRow is one program the app looks for.
+func (a *app) toolRow(c *ui.Context, name, path string) {
+	p := colors()
+	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, name).FontSize(11.5).TextColor(p.muted).Width(64)
+		if path != "" {
+			ui.Text(c, path).FontSize(10.5).TextColor(p.faint).SingleLine().Shrink(1)
+		} else {
+			ui.Text(c, "未找到").FontSize(11).TextColor(ui.Hex("#ef8f7a"))
+		}
+		ui.Box(c).Grow(1)
+		ghostButton(c, "选择…", iconFolder, func() { a.chooseTool(name) })
+	})
+}
+
+// chooseTool asks where a program is.
+func (a *app) chooseTool(name string) {
+	go func() {
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Title:       "选择 " + name,
+			ButtonLabel: "使用",
+			Message:     "选 " + name + " 的位置",
+		})
+		if err != nil || len(paths) == 0 {
+			return
+		}
+		mygo.RunOnMain(func() {
+			a.store.SetTool(name, paths[0])
+			a.detectTools()
+		})
+	}()
+}
+
+// detectTools looks for ffmpeg and ffprobe again, and tells the plugins.
+func (a *app) detectTools() {
+	tools := a.store.Tools()
+	a.ffmpeg = ffbin.Locate("ffmpeg", tools.FFmpeg, a.toolBin)
+	a.ffprobe = ffbin.Locate("ffprobe", tools.FFprobe, a.toolBin)
+	for _, pe := range a.plugins {
+		if pe.p != nil {
+			pe.p.SetFFmpeg(a.ffmpeg != "")
+		}
+	}
+	state := "未找到"
+	if a.ffmpeg != "" {
+		state = a.ffmpeg
+	}
+	a.say("ffmpeg：%s", state)
+	a.invalidate()
 }
 
 func settingsCard(c *ui.Context, title string, body func()) {

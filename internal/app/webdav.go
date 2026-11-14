@@ -186,7 +186,7 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 		URL:     it.RemoteID,
 		Type:    kind,
 		Headers: a.webdavAuth(),
-		FFmpeg:  a.thumbTool,
+		FFmpeg:  a.ffmpeg,
 		Start:   d,
 	})
 	if err != nil {
@@ -211,8 +211,8 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 // probeWebDAVDuration asks ffprobe how long the video is: an HLS remux
 // tells the player only what it has made so far.
 func (a *app) probeWebDAVDuration(it media.Item) {
-	probe, err := exec.LookPath("ffprobe")
-	if err != nil {
+	probe := a.ffprobe
+	if probe == "" {
 		return
 	}
 	args := []string{"-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"}

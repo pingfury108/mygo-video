@@ -115,6 +115,7 @@ type Plugin struct {
 	settings map[string]string
 	storage  map[string]json.RawMessage
 	cookie   string
+	ffmpeg   bool
 	vm       *vm
 }
 
@@ -393,6 +394,7 @@ func (p *Plugin) installHost(v *vm) error {
 		"arch":     runtime.GOARCH,
 		"dir":      p.dir,
 		"dataDir":  p.data,
+		"ffmpeg":   p.FFmpeg(),
 		"storage": map[string]any{
 			"get":    moejs.NativeFunc(p.storageGet(v)),
 			"set":    moejs.NativeFunc(p.storageSet(v)),

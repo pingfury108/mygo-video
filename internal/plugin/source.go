@@ -161,3 +161,18 @@ func (p *Plugin) Danmaku(id string) ([]Cue, error) {
 	}
 	return r.Cues, nil
 }
+
+// SetFFmpeg says whether the app has ffmpeg, which a plugin may need to
+// join a stream kept apart.
+func (p *Plugin) SetFFmpeg(on bool) {
+	p.mu.Lock()
+	p.ffmpeg = on
+	p.mu.Unlock()
+}
+
+// FFmpeg is whether the app has ffmpeg.
+func (p *Plugin) FFmpeg() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.ffmpeg
+}

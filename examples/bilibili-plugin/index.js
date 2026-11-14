@@ -174,7 +174,7 @@ export async function play({ id, quality }) {
     "/x/player/playurl?bvid=" + bvid + "&cid=" + cid + "&fnver=0&fourk=1";
 
   // 1080P keeps picture and sound apart, as DASH does; 720P is one mp4.
-  if (quality !== "720") {
+  if (quality !== "720" && host.ffmpeg !== false) {
     try {
       const d = await api(base + "&qn=80&fnval=16");
       const dash = d && d.dash;
@@ -216,6 +216,22 @@ function playHeaders() {
 }
 
 async function playEpisode(ep) {
+  if (host.ffmpeg === false) {
+    const d = await api(
+      "/pgc/player/web/playurl?ep_id=" + ep + "&qn=64&fnval=1&fnver=0&fourk=1",
+    );
+    const seg = d.durl && d.durl[0];
+    if (seg) {
+      return {
+        url: seg.url,
+        type: "mp4",
+        headers: playHeaders(),
+        quality: "720P",
+        duration: seg.length || 0,
+      };
+    }
+    throw new Error("这一集需要大会员，或暂时不可用");
+  }
   const d = await api(
     "/pgc/player/web/playurl?ep_id=" + ep + "&qn=80&fnval=16&fnver=0&fourk=1",
   );
