@@ -269,6 +269,7 @@ func (a *app) start() {
 	}
 	tools := st.Tools()
 	a.ffmpeg = ffbin.Locate("ffmpeg", tools.FFmpeg, a.toolBin)
+	a.diag("ffmpeg=%q toolBin=%q", a.ffmpeg, a.toolBin)
 	a.thumbs = map[string]*ui.Bitmap{}
 	a.thumbBusy = map[string]bool{}
 	a.thumbUsed = map[string]time.Time{}
@@ -732,6 +733,7 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 	if pb.Dash != nil && pb.Dash.Video != "" {
 		videoURL, audio, kind = pb.Dash.Video, pb.Dash.Audio, "dash"
 	}
+	a.diag("play source=%s type=%s live=%v ffmpeg=%q", it.Source, kind, pb.Live, a.ffmpeg)
 	if p := a.pluginByID(it.Source); p != nil {
 		if !p.AllowsHost(videoURL) || (audio != "" && !p.AllowsHost(audio)) {
 			a.say("这个来源没有访问该地址的权限")
@@ -917,4 +919,17 @@ func (a *app) setVolume(v float64) {
 func (a *app) say(format string, args ...any) {
 	a.toast = fmt.Sprintf(format, args...)
 	a.invalidate()
+}
+
+// diag writes a line to diag.log, for what a run should leave behind.
+func (a *app) diag(format string, args ...any) {
+	if a.dataDir == "" {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(a.dataDir, "diag.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
 }
