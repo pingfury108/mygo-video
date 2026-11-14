@@ -39,6 +39,10 @@ func (a *app) playerPage(c *ui.Context) {
 		a.uiHidden = true
 	}
 	// A series goes on to its next episode when one ends.
+	if pl.Ready() && !a.playReady {
+		a.playReady = true
+		a.diag("ready after %v", time.Since(a.playStarted))
+	}
 	if pl.Ready() && pl.Ended() {
 		if !a.ended {
 			a.ended = true

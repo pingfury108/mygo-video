@@ -212,7 +212,11 @@ type app struct {
 	// quality is what to ask a plugin for, and playingQuality what it gave.
 	quality        string
 	playingQuality string
-	progressAt     time.Time
+	// playStarted is when the stream was asked for, and playReady whether
+	// its first frame came.
+	playStarted time.Time
+	playReady   bool
+	progressAt  time.Time
 
 	// The pointer over the video, for the controls to come back at the
 	// window's edges.
@@ -800,6 +804,8 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	a.playing = it
 	a.playingQuality = ""
 	a.danmaku = nil
+	a.playStarted = time.Now()
+	a.playReady = false
 	a.fresh = fromStart
 	a.route = pagePlayer
 	a.rate = a.store.Rate()
