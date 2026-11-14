@@ -63,13 +63,15 @@ func (a *app) danmakuLayer(c *ui.Context) {
 				continue
 			}
 			x := float64(width) - float64(age)*0.11
-			top := float32(56 + (i%12)*26)
+			// Rows go by what shows now, not by how many comments the video
+			// has had: a live chat would otherwise start halfway down.
+			top := float32(56 + (shown%10)*26)
 			if fixed {
 				x = float64(width) * 0.34
 				if cue.Mode == 4 {
-					top = height - float32(110+(i%3)*26)
+					top = height - float32(110+(shown%3)*26)
 				} else {
-					top = 56 + float32((i%3)*26)
+					top = 56 + float32((shown%3)*26)
 				}
 			}
 			if x < -500 {
