@@ -49,6 +49,7 @@ func (a *app) loadPlugins() {
 			} else {
 				pe.p = p
 				pe.p.SetFFmpeg(a.ffmpeg != "")
+				pe.p.SetDanmakuHandler(a.liveDanmakuHandler(p))
 			}
 		}
 		out = append(out, pe)
@@ -149,6 +150,7 @@ func (a *app) setPluginEnabled(pe *pluginEntry, on bool) {
 			pe.p = p
 			pe.err = nil
 			pe.p.SetFFmpeg(a.ffmpeg != "")
+			pe.p.SetDanmakuHandler(a.liveDanmakuHandler(p))
 			if h := a.readPluginCookie(id); h != "" {
 				pe.p.SetCookie(h)
 			}

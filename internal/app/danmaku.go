@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"mygo-video/internal/media"
+	"mygo-video/internal/plugin"
 )
 
 // danmakuLife is how long a comment flies across the video.
@@ -90,4 +91,43 @@ func (a *app) toggleDanmaku() {
 	a.danmakuOn = !a.danmakuOn
 	a.uiShown = time.Now()
 	a.invalidate()
+}
+
+// startLiveDanmaku asks the plugin for the live chat of a channel.
+func (a *app) startLiveDanmaku(it media.Item) {
+	p := a.pluginByID(it.Source)
+	if p == nil || !p.Can("liveDanmaku") {
+		return
+	}
+	go func() { _ = p.LiveDanmaku(it.RemoteID) }()
+}
+
+// stopLiveDanmaku closes the live chat the plugin opened.
+func (a *app) stopLiveDanmaku() {
+	s := a.playing.Source
+	if s == "" || s == "webdav" || s == "iptv" {
+		return
+	}
+	p := a.pluginByID(s)
+	if p == nil {
+		return
+	}
+	go func() { _ = p.StopLive() }()
+}
+
+// liveDanmakuHandler puts what a plugin's live chat pushes at the playhead.
+func (a *app) liveDanmakuHandler(p *plugin.Plugin) func(plugin.Cue) {
+	return func(cue plugin.Cue) {
+		mygo.RunOnMain(func() {
+			if a.player == nil || a.playing.Source != p.Info().ID {
+				return
+			}
+			cue.Time = a.playhead().Milliseconds()
+			a.danmaku = append(a.danmaku, cue)
+			if len(a.danmaku) > 300 {
+				a.danmaku = a.danmaku[len(a.danmaku)-300:]
+			}
+			a.invalidate()
+		})
+	}
 }

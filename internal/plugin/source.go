@@ -176,3 +176,20 @@ func (p *Plugin) FFmpeg() bool {
 	defer p.mu.Unlock()
 	return p.ffmpeg
 }
+
+// LiveList is the plugin's live channels.
+func (p *Plugin) LiveList() (*media.Browse, error) { return p.browseOf("live") }
+
+// LiveDanmaku subscribes to a live channel's chat, which the plugin pushes
+// to the handler the app set.
+func (p *Plugin) LiveDanmaku(id string) error {
+	return p.call("liveDanmaku", map[string]string{"id": id}, nil)
+}
+
+// StopLive ends the live chat.
+func (p *Plugin) StopLive() error {
+	if !p.exports["stopLive"] {
+		return nil
+	}
+	return p.call("stopLive", nil, nil)
+}

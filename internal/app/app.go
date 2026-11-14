@@ -584,6 +584,8 @@ func (a *app) loadPluginTab() {
 			b, err = p.Following()
 		case "watchlater":
 			b, err = p.WatchLater()
+		case "live":
+			b, err = p.LiveList()
 		default:
 			b, err = p.Home()
 		}
@@ -635,6 +637,7 @@ func (a *app) pluginTabs() []struct{ key, label string } {
 		return tabs
 	}
 	for _, t := range []struct{ key, label, export string }{
+		{"live", "直播", "live"},
 		{"history", "历史", "history"},
 		{"favorites", "收藏", "favorites"},
 		{"following", "追番", "following"},
@@ -661,6 +664,7 @@ func itemFromVideo(source string, v media.Video) media.Item {
 		Poster:   v.Poster,
 		Overview: v.Overview,
 		URL:      v.URL,
+		Live:     v.Live,
 	}
 }
 
@@ -754,9 +758,16 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 	a.proxyToken = token
 	a.subs = nil
 	a.subsOn = false
+	if pb.Live {
+		fromStart = true
+	}
 	a.beginPlayback(it, player, fromStart)
 	a.playingQuality = pb.Quality
-	a.loadDanmaku(it)
+	if pb.Live {
+		a.startLiveDanmaku(it)
+	} else {
+		a.loadDanmaku(it)
+	}
 }
 
 // beginPlayback makes p the video showing, from where the listener stopped
@@ -814,6 +825,7 @@ func (a *app) closePlayer() {
 		return
 	}
 	a.saveProgress()
+	a.stopLiveDanmaku()
 	a.player.Close()
 	a.player = nil
 }
@@ -825,7 +837,7 @@ func (a *app) saveProgress() {
 		return
 	}
 	// A live channel has no place to keep.
-	if a.playing.Source == "iptv" {
+	if a.playing.Source == "iptv" || a.playing.Live {
 		return
 	}
 	// Before the first picture the engine has no position to keep, and a

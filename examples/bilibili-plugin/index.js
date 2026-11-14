@@ -1,5 +1,6 @@
 // 哔哩哔哩：热门、搜索、分 P 和直链播放。Cookie 填在设置里。
 const API = "https://api.bilibili.com";
+const LIVE = "https://api.live.bilibili.com";
 const REFERER = "https://www.bilibili.com";
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
@@ -158,6 +159,21 @@ async function seasonTitle(sid) {
 
 export async function play({ id, quality }) {
   const raw = String(id);
+  if (raw.startsWith("live:")) {
+    const room = raw.slice(5);
+    const d = await liveGet(
+      "/room/v1/Room/playUrl?cid=" + room + "&platform=web&qn=10000",
+    );
+    const seg = d.durl && d.durl[0] && d.durl[0].url;
+    if (!seg) throw new Error("这个直播间暂时没有流");
+    return {
+      url: seg,
+      type: "flv",
+      live: true,
+      quality: "原画",
+      headers: liveHeaders(),
+    };
+  }
   if (raw.startsWith("season:")) {
     return { open: "https://www.bilibili.com/bangumi/play/ss" + raw.slice(7) };
   }
@@ -397,4 +413,77 @@ export async function following() {
     url: "https://www.bilibili.com/bangumi/play/ss" + s.season_id,
   }));
   return { title: "追番", sections: [{ title: "", videos }] };
+}
+
+function liveHeaders() {
+  const h = { "User-Agent": UA, Referer: "https://live.bilibili.com/" };
+  const c = cookie();
+  if (c) h.Cookie = c;
+  return h;
+}
+
+async function liveGet(path) {
+  const res = await fetch(LIVE + path, { headers: liveHeaders() });
+  if (!res.ok) throw new Error("B 站直播返回 " + res.status);
+  const body = await res.json();
+  if (body.code !== 0) throw new Error(body.message || "直播接口出错");
+  if (body.data !== undefined) return body.data;
+  if (body.result !== undefined) return body.result;
+  return {};
+}
+
+// live is the channels the site is showing now.
+export async function live() {
+  const d = await liveGet("/room/v1/room/get_user_recommend?page=1&page_size=30");
+  const list = Array.isArray(d) ? d : d.list || [];
+  const videos = list.map((r) => ({
+    id: "live:" + r.roomid,
+    name: r.title,
+    poster: pic(r.user_cover || r.system_cover || r.cover),
+    overview:
+      (r.uname ? r.uname : "") +
+      (r.online ? (r.uname ? " · " : "") + r.online + " 人气" : ""),
+    live: true,
+    url: "https://live.bilibili.com/" + r.roomid,
+  }));
+  return { title: "直播", sections: [{ title: "推荐", videos }] };
+}
+
+// The live chat is polled a few seconds at a time: the site's WebSocket
+// chat refuses clients that are not its own page.
+let liveTimer = null;
+let liveSeen = null;
+
+export async function liveDanmaku({ id }) {
+  stopLive();
+  const room = String(id).replace(/^live:/, "");
+  liveSeen = new Set();
+  const tick = async () => {
+    try {
+      const d = await liveGet(
+        "/xlive/web-room/v1/dM/gethistory?roomid=" + room + "&room_type=0",
+      );
+      for (const m of (d.room || []).slice().reverse()) {
+        const key = m.uid + "|" + m.timeline + "|" + m.text;
+        if (liveSeen.has(key)) continue;
+        liveSeen.add(key);
+        if (liveSeen.size > 400) {
+          liveSeen = new Set(Array.from(liveSeen).slice(-300));
+        }
+        if (m.text) host.emitDanmaku({ text: m.text, color: "#ffffff" });
+      }
+    } catch (e) {
+      // The chat of a channel that ended has nothing to say.
+    }
+  };
+  await tick();
+  liveTimer = setInterval(tick, 2000);
+}
+
+export function stopLive() {
+  if (liveTimer) {
+    clearInterval(liveTimer);
+    liveTimer = null;
+  }
+  liveSeen = null;
 }

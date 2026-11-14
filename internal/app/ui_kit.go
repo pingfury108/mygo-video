@@ -91,7 +91,13 @@ func (a *app) videoCard(c *ui.Context, it media.Item, width float32) {
 	if b.Hovered() {
 		b.Background(p.hover)
 	}
-	b.OnClick(func() { a.openDetail(it) })
+	b.OnClick(func() {
+		if it.Live {
+			a.play(it, true)
+			return
+		}
+		a.openDetail(it)
+	})
 	b.Children(func() {
 		ui.Column(c).Grow(1).Gap(7).Children(func() {
 			a.thumb(c, it, prog)
@@ -123,6 +129,11 @@ func (a *app) thumb(c *ui.Context, it media.Item, prog media.Progress) {
 		if prog.Started() {
 			ui.Text(c, remaining(prog)).Absolute().Right(7).Bottom(6).FontSize(10).FontWeight(600).
 				TextColor(ui.RGBA(255, 255, 255, 0.86))
+		}
+		if it.Live {
+			ui.Text(c, "LIVE").Absolute().Left(7).Top(6).FontSize(9.5).FontWeight(700).
+				TextColor(ui.Hex("#ffffff")).Padding(2, 6).Radius(4).
+				Background(ui.RGBA(239, 59, 59, 0.9))
 		}
 	})
 }

@@ -135,7 +135,7 @@ func (p *Proxy) Open(s Stream) (string, string, error) {
 	// An MP4 with its moov at the end can't be streamed by the system's
 	// player over HTTP: it waits for the whole file. Remux it to HLS as it
 	// comes, which the player begins on at once.
-	if s.Audio != "" || s.Type == "dash" {
+	if s.Audio != "" || s.Type == "dash" || s.Type == "flv" {
 		if s.FFmpeg == "" {
 			return "", "", errors.New("streamproxy: a dash stream needs ffmpeg")
 		}

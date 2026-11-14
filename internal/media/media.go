@@ -31,6 +31,9 @@ type Item struct {
 	Poster   string `json:"poster,omitempty"`
 	Overview string `json:"overview,omitempty"`
 	Duration int64  `json:"duration,omitempty"` // milliseconds
+	// Live says the video is a live channel, which has no length and keeps
+	// no place.
+	Live bool `json:"live,omitempty"`
 }
 
 // EpisodeLabel is "S02E05", or "" for a film.
@@ -145,6 +148,8 @@ type Video struct {
 	Poster   string `json:"poster,omitempty"`
 	Backdrop string `json:"backdrop,omitempty"`
 	Overview string `json:"overview,omitempty"`
+	// Live says the video is a live channel with no length of its own.
+	Live bool `json:"live,omitempty"`
 	// URL is the video's own page at its source, for sharing or for a
 	// source that plays there instead of here.
 	URL string `json:"url,omitempty"`

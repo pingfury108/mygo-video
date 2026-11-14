@@ -117,6 +117,10 @@ type Plugin struct {
 	cookie   string
 	ffmpeg   bool
 	vm       *vm
+	ws       map[string]*wsConn
+	wsSeq    int32
+
+	onDanmaku func(Cue)
 }
 
 // Load reads and compiles the plugin in dir, keeping its data in dataDir,
@@ -420,6 +424,54 @@ func (p *Plugin) installHost(v *vm) error {
 			}
 			return moejs.Undefined(), openURL(address)
 		}),
+		"ws": map[string]any{
+			"open": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				url := moejs.Arg(args, 0).String()
+				var headers map[string]string
+				if len(args) > 1 {
+					headers = wsHeaders(v, args[1])
+				}
+				return moejs.String(p.wsOpen(v, url, headers)), nil
+			}),
+			"on": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				p.wsOn(moejs.Arg(args, 0).String(), moejs.Arg(args, 1).String(), moejs.Arg(args, 2))
+				return moejs.Undefined(), nil
+			}),
+			"send": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				data, _ := v.rt.ToGo(moejs.Arg(args, 1))
+				b, _ := data.([]byte)
+				if b == nil {
+					b = []byte(moejs.Arg(args, 1).String())
+				}
+				return moejs.Undefined(), p.wsSend(moejs.Arg(args, 0).String(), b)
+			}),
+			"close": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				p.wsClose(moejs.Arg(args, 0).String())
+				return moejs.Undefined(), nil
+			}),
+		},
+		"inflate": moejs.NativeFunc(func(realm *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+			b, _ := realm.ToGo(moejs.Arg(args, 0)).([]byte)
+			out, err := inflateZlib(b)
+			if err != nil {
+				return moejs.Undefined(), err
+			}
+			return realm.FromGo(out)
+		}),
+		"text": moejs.NativeFunc(func(realm *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+			b, _ := realm.ToGo(moejs.Arg(args, 0)).([]byte)
+			return moejs.String(string(b)), nil
+		}),
+		"emitDanmaku": moejs.NativeFunc(func(realm *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+			m, _ := realm.ToGo(moejs.Arg(args, 0)).(map[string]any)
+			text, _ := m["text"].(string)
+			if text == "" {
+				return moejs.Undefined(), nil
+			}
+			color, _ := m["color"].(string)
+			p.pushDanmaku(Cue{Text: text, Color: color, Time: time.Now().UnixMilli()})
+			return moejs.Undefined(), nil
+		}),
 		"crypto": map[string]any{
 			"md5": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 				sum := md5.Sum([]byte(moejs.Arg(args, 0).String()))
@@ -607,12 +659,30 @@ func (p *Plugin) drop(v *vm) {
 func (p *Plugin) Close() {
 	p.starting.Lock()
 	defer p.starting.Unlock()
+	p.closeWS()
 	p.mu.Lock()
 	v := p.vm
 	p.vm = nil
 	p.mu.Unlock()
 	if v != nil {
 		v.close()
+	}
+}
+
+// SetDanmakuHandler takes the comments a live chat pushes.
+func (p *Plugin) SetDanmakuHandler(fn func(Cue)) {
+	p.mu.Lock()
+	p.onDanmaku = fn
+	p.mu.Unlock()
+}
+
+// pushDanmaku gives one comment to the app, if anyone listens.
+func (p *Plugin) pushDanmaku(cue Cue) {
+	p.mu.Lock()
+	fn := p.onDanmaku
+	p.mu.Unlock()
+	if fn != nil {
+		fn(cue)
 	}
 }
 
