@@ -19,6 +19,7 @@ jobs:
       matrix:
         include:
           - target: darwin-arm64
+          - target: darwin-amd64
           - target: windows-amd64
           - target: linux-amd64
     steps:
@@ -30,6 +31,11 @@ jobs:
           case "${{ matrix.target }}" in
             darwin-arm64)
               curl -fsSL -o /tmp/f.gz https://github.com/eugeneware/ffmpeg-static/releases/latest/download/ffmpeg-darwin-arm64.gz
+              gunzip -c /tmp/f.gz > out/ffmpeg
+              chmod +x out/ffmpeg
+              ;;
+            darwin-amd64)
+              curl -fsSL -o /tmp/f.gz https://github.com/eugeneware/ffmpeg-static/releases/latest/download/ffmpeg-darwin-x64.gz
               gunzip -c /tmp/f.gz > out/ffmpeg
               chmod +x out/ffmpeg
               ;;
@@ -61,6 +67,9 @@ jobs:
           - os: macos-latest
             target: darwin-arm64
             platform: darwin/arm64
+          - os: macos-latest
+            target: darwin-amd64
+            platform: darwin/amd64
           - os: windows-latest
             target: windows-amd64
             platform: windows/amd64
