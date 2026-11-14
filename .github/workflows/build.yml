@@ -81,6 +81,10 @@ jobs:
         with:
           name: tools-${{ matrix.target }}
           path: resources/${{ matrix.target }}/bin
+      - name: make the tool executable
+        if: matrix.target != 'windows-amd64'
+        shell: bash
+        run: chmod +x resources/${{ matrix.target }}/bin/*
       - name: build
         shell: bash
         run: go tool mygo build -platform ${{ matrix.platform }}
