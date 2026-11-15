@@ -1,14 +1,17 @@
 {
   "id": "tencent",
   "name": "腾讯视频",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
   "main": "index.js",
-  "description": "腾讯视频的频道与搜索入口。正片在官方页播放，接口需要签名，应用里只做目录（L2）。",
+  "description": "腾讯视频的首页与频道。正片在官方页面播放（目录）。",
   "playback": "catalog",
   "permissions": {
     "network": [
-      "v.qq.com"
+      "pbaccess.video.qq.com",
+      "v.qq.com",
+      "puui.qpic.cn",
+      "*.qpic.cn"
     ]
   }
 }

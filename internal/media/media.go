@@ -71,7 +71,12 @@ func (it Item) Subtitle() string {
 			parts = append(parts, HumanDuration(it.Duration))
 		}
 		if len(parts) == 0 {
-			return "视频"
+			// A card without a length says what it does instead, as a
+			// catalog entry does.
+			if it.Overview != "" {
+				return short(it.Overview, 24)
+			}
+			return ""
 		}
 		return strings.Join(parts, " · ")
 	}
@@ -82,6 +87,15 @@ func (it Item) Subtitle() string {
 	parts = append(parts, strings.ToUpper(strings.TrimPrefix(it.Ext, ".")))
 	parts = append(parts, HumanSize(it.Size))
 	return strings.Join(parts, " · ")
+}
+
+// short is s cut to n runes, with an ellipsis when it was longer.
+func short(s string, n int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= n {
+		return string(r)
+	}
+	return strings.TrimSpace(string(r[:n])) + "…"
 }
 
 // Progress is where the listener stands in an item.

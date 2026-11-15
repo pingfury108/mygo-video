@@ -8,7 +8,7 @@
 
 用 Go 和 [MyGo](https://github.com/egoist/mygo) 写的原生桌面视频播放器。界面由 MyGo 在 GPU 上绘制，视频交给系统的媒体框架硬解（macOS AVFoundation、Windows Media Foundation、Linux GStreamer）。
 
-本地库、WebDAV、IPTV，以及一个能接入视频站点的插件系统——B 站插件支持热门、搜索、追番选集、收藏、历史、稍后再看、1080P DASH、弹幕，以及**直播和直播弹幕**；优酷能搜到并打开官方页；腾讯视频只有频道与搜索入口（`playback: catalog`，正片交给官方页面）。
+本地库、WebDAV、IPTV，以及一个能接入视频站点的插件系统——B 站插件支持热门、搜索、追番选集、收藏、历史、稍后再看、1080P DASH、弹幕，以及**直播和直播弹幕**；腾讯视频与优酷提供浏览与搜索，正片在官方页面播放（`playback: catalog`）。
 
 ![搜索](docs/screens/search.jpg)
 
@@ -243,7 +243,7 @@ app 不接触密码，也不把 Cookie 给别的插件。
 - 运行日志看 `diag.log`（数据目录下）和 `go tool mygo dev` 的终端
 - `host.ffmpeg` 告诉插件有没有 ffmpeg，可以据此降级（B 站就降到了 720P）
 
-完整示例见 [`examples/bilibili-plugin`](examples/bilibili-plugin)：热门、搜索、分 P、追番选集、收藏、历史、直播、弹幕、登录、1080P。另有 [`examples/youku-plugin`](examples/youku-plugin)（搜索 + 打开官方页）和 [`examples/tencent-plugin`](examples/tencent-plugin)（`playback: catalog`，只有频道与搜索入口）。
+完整示例见 [`examples/bilibili-plugin`](examples/bilibili-plugin)：热门、搜索、分 P、追番选集、收藏、历史、直播、弹幕、登录、1080P。另有 [`examples/youku-plugin`](examples/youku-plugin)（搜索 + 打开官方页）和 [`examples/tencent-plugin`](examples/tencent-plugin)（`playback: catalog`，用 `getPage` 读首页与频道的剧集，播放交给官方专辑页）。
 
 ## 数据目录
 
@@ -308,7 +308,7 @@ open designs/mygo-video/index.html
 - 封面是正片里的一帧，不是刮削来的海报；没有 ffmpeg 时回退到首字色块
 - 字幕只取文本：ASS/SSA 的位置与样式不还原，内嵌的只取第一条轨
 - B 站直播弹幕用轮询（官方 WebSocket 拒绝非官方客户端），延迟约 2 秒
-- 腾讯视频的搜索与列表接口要签名，直连被风控拒绝，插件只提供频道与搜索入口
+- 腾讯视频的搜索接口要签名，插件只把搜索交给官方页面；浏览用的是它自己的 `getPage`
 - 受 DRM 保护的内容无法播放，这是有意为之
 - 只播放你有权访问的内容
 

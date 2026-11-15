@@ -1,13 +1,16 @@
 package plugin
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
 
-// TestTencentPlugin checks the catalog plugin's own shape; it makes no
-// requests, because every card is a page to open.
+// TestTencentPlugin reads the real channel pages when NETWORK is set.
 func TestTencentPlugin(t *testing.T) {
+	if os.Getenv("NETWORK") == "" {
+		t.Skip("NETWORK is not set")
+	}
 	p, err := Load("../../examples/tencent-plugin", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -18,34 +21,49 @@ func TestTencentPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(home.Sections) == 0 || len(home.Sections[0].Videos) < 5 {
-		t.Fatalf("home has %d sections", len(home.Sections))
+	if len(home.Sections) == 0 {
+		t.Fatal("no sections on home")
 	}
-	t.Logf("home: %d channels, first %q", len(home.Sections[0].Videos), home.Sections[0].Videos[0].Name)
+	for _, s := range home.Sections {
+		t.Logf("home %q: %d videos", s.Title, len(s.Videos))
+	}
+	first := home.Sections[0].Videos[0]
+	if first.Name == "" {
+		t.Fatal("first video has no name")
+	}
+	if first.Poster == "" {
+		t.Error("first video has no poster")
+	}
+	t.Logf("first: %s (%s) %s", first.Name, first.ID, first.Poster)
+
+	detail, err := p.Title(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Video.Name != first.Name {
+		t.Errorf("title %q, want %q", detail.Video.Name, first.Name)
+	}
+	pb, err := p.Play(first.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pb.Open, "v.qq.com/x/cover/") {
+		t.Errorf("opens %q", pb.Open)
+	}
+	t.Logf("play opens %s", pb.Open)
 
 	sr, err := p.Search("三体", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sr.Videos) != 1 {
-		t.Fatalf("search returned %d", len(sr.Videos))
+	if len(sr.Videos) != 1 || !strings.Contains(sr.Videos[0].Name, "三体") {
+		t.Errorf("search gave %+v", sr.Videos)
 	}
-	t.Logf("search: %s", sr.Videos[0].Name)
-
-	detail, err := p.Title(sr.Videos[0].ID)
+	pb, err = p.Play(sr.Videos[0].ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(detail.Video.Name, "三体") {
-		t.Errorf("title %q", detail.Video.Name)
+	if !strings.Contains(pb.Open, "x/search/") {
+		t.Errorf("search opens %q", pb.Open)
 	}
-
-	pb, err := p.Play(detail.Video.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(pb.Open, "v.qq.com") || !strings.Contains(pb.Open, "%E4%B8%89%E4%BD%93") {
-		t.Errorf("opens %q", pb.Open)
-	}
-	t.Logf("play opens %s", pb.Open)
 }
