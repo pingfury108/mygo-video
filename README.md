@@ -1,7 +1,7 @@
 # MyGo Video
 
 [![build](https://github.com/pingfury108/mygo-video/actions/workflows/build.yml/badge.svg)](https://github.com/pingfury108/mygo-video/actions/workflows/build.yml)
-[![download](https://img.shields.io/badge/download-builds-2ea44f)](https://github.com/pingfury108/mygo-video/actions/workflows/build.yml)
+[![download](https://img.shields.io/badge/download-releases-2ea44f)](https://github.com/pingfury108/mygo-video/releases/latest)
 ![go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
 ![platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-555)
 ![license](https://img.shields.io/badge/license-MIT-blue)
@@ -53,16 +53,16 @@
 
 ### 下载
 
-GitHub Actions 会为四个平台构建并打包（内含对应架构的 ffmpeg）：
+在 [Releases](https://github.com/pingfury108/mygo-video/releases/latest) 下载最新版本，包内含对应架构的 ffmpeg：
 
-| 平台 | 产物 |
+| 平台 | 文件 |
 | --- | --- |
-| macOS Apple Silicon | `app-darwin-arm64` |
-| macOS Intel | `app-darwin-amd64` |
-| Windows x64 | `app-windows-amd64` |
-| Linux x64 | `app-linux-amd64` |
+| macOS Apple Silicon | `mygo-video-<版本>-darwin-arm64.zip` |
+| macOS Intel | `mygo-video-<版本>-darwin-amd64.zip` |
+| Windows x64 | `mygo-video-<版本>-windows-amd64.zip` |
+| Linux x64 | `mygo-video-<版本>-linux-amd64.zip` |
 
-到仓库的 **Actions → build** 里，打开最近一次成功的运行，在 Artifacts 下载。
+推一个 `v*` 标签就会触发构建并自动建 Release；README 之后的所有提交也在同一次运行里校验。
 
 ### 本地构建
 

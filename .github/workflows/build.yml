@@ -3,6 +3,7 @@ name: build
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -108,3 +109,45 @@ jobs:
           name: app-${{ matrix.target }}
           path: build
           if-no-files-found: error
+      - name: pack
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="mygo-video-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          case "${{ matrix.target }}" in
+            darwin-*) ditto -c -k --sequesterRsrc --keepParent build/*.app "$name.zip" ;;
+            windows-*) powershell -Command "Compress-Archive -Path build/* -DestinationPath '$name.zip'" ;;
+            *) (cd build && zip -qr "../$name.zip" .) ;;
+          esac
+          ls -lh "$name.zip"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: zip-${{ matrix.target }}
+          path: "*.zip"
+          if-no-files-found: error
+
+  # Publish the four zips when a version tag is pushed.
+  release:
+    name: release ${{ github.ref_name }}
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: zip-*
+          path: dist
+          merge-multiple: true
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -lh dist
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --generate-notes \
+            --title "$GITHUB_REF_NAME"
