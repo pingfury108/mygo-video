@@ -1,5 +1,11 @@
 # MyGo Video
 
+[![build](https://github.com/pingfury108/mygo-video/actions/workflows/build.yml/badge.svg)](https://github.com/pingfury108/mygo-video/actions/workflows/build.yml)
+[![download](https://img.shields.io/badge/download-builds-2ea44f)](https://github.com/pingfury108/mygo-video/actions/workflows/build.yml)
+![go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
+![platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-555)
+![license](https://img.shields.io/badge/license-MIT-blue)
+
 用 Go 和 [MyGo](https://github.com/egoist/mygo) 写的原生桌面视频播放器。界面由 MyGo 在 GPU 上绘制，视频交给系统的媒体框架硬解（macOS AVFoundation、Windows Media Foundation、Linux GStreamer）。
 
 本地库、WebDAV、IPTV，以及一个能接入视频站点的插件系统——B 站插件支持热门、搜索、追番选集、收藏、历史、稍后再看、1080P DASH、弹幕，以及**直播和直播弹幕**。
@@ -302,6 +308,10 @@ open designs/mygo-video/index.html
 - B 站直播弹幕用轮询（官方 WebSocket 拒绝非官方客户端），延迟约 2 秒
 - 受 DRM 保护的内容无法播放，这是有意为之
 - 只播放你有权访问的内容
+
+## License
+
+代码是 MIT，见 [LICENSE](LICENSE)。发行包里内嵌的 ffmpeg 是独立的程序（macOS 为 GPL 构建，Windows/Linux 为 LGPL 构建），它的许可与来源见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 ## 下一步
 
