@@ -1,75 +1,146 @@
 # MyGo Video
 
-用 Go 和 [MyGo](https://github.com/egoist/mygo) 写的原生桌面视频播放器。没有 WebView，界面由 MyGo 在 GPU 上绘制；视频交给系统的媒体框架硬解（macOS AVFoundation、Windows Media Foundation、Linux GStreamer）。
+用 Go 和 [MyGo](https://github.com/egoist/mygo) 写的原生桌面视频播放器。界面由 MyGo 在 GPU 上绘制，视频交给系统的媒体框架硬解（macOS AVFoundation、Windows Media Foundation、Linux GStreamer）。
 
-当前已到 **M3**：本地视频库、WebDAV、IPTV 直播、播放器、插件系统（腾讯/优酷等来源按 [docs/PLAN.md](docs/PLAN.md) 的 M4–M5 继续）。
+本地库、WebDAV、IPTV，以及一个能接入视频站点的插件系统——B 站插件支持热门、搜索、追番选集、收藏、历史、稍后再看、1080P DASH、弹幕，以及**直播和直播弹幕**。
 
-## 运行
+![首页](docs/screens/home.jpg)
+
+## 功能
+
+**本地与内置源**
+
+- 扫描 `~/Movies`、桌面、下载和应用数据目录下的 `videos/`，识别 `S02E05`、`1x05`、`第05集` 这样的集数
+- 同名的剧集自动折叠成一张卡，详情页选集，播放页 `,` `.` 切上一集/下一集
+- WebDAV：浏览文件夹、Basic Auth、播放走本机代理；moov 在尾部的 MP4 自动转 HLS，边转边播
+- IPTV：M3U/M3U8 列表，按分组浏览直播频道
+
+**播放器**
+
+- 系统解码、进度条拖动、音量、10 秒快进/后退、续播、倍速（会记住）、全屏
+- 一集播完自动接下一集
+- 字幕：自动加载同名的 `.srt` / `.vtt`
+- 弹幕：插件提供的点播弹幕（滚动 + 顶/底固定）和直播弹幕
+- 清晰度：插件可提供 1080P DASH，由代理合成 HLS
+
+**插件**
+
+- 独立「插件」页：安装（文件夹 / zip / GitHub）、启用、停用、设置、账号、卸载
+- 插件默认停用；停用会关掉 JS 运行时和网络访问，数据保留
+- 插件只产出数据，界面全部由 app 绘制
+
+![插件页](docs/screens/plugins.jpg)
+
+**搜索与详情**
+
+- 搜索文件名、剧名、集数，`⌘F` 聚焦
+- 插件来源的搜索走各自的接口（B 站用 wbi 签名）
+- 详情页有海报、简介、选集、进度、清除记录
+
+## 截图
+
+<p>
+  <img src="docs/screens/player.jpg" width="49%" alt="直播播放与弹幕">
+  <img src="docs/screens/search.jpg" width="49%" alt="搜索">
+</p>
+<p>
+  <img src="docs/screens/library.jpg" width="49%" alt="片库">
+  <img src="docs/screens/settings.jpg" width="49%" alt="设置">
+</p>
+
+## 安装
+
+### 下载
+
+GitHub Actions 会为四个平台构建并打包（内含对应架构的 ffmpeg）：
+
+| 平台 | 产物 |
+| --- | --- |
+| macOS Apple Silicon | `app-darwin-arm64` |
+| macOS Intel | `app-darwin-amd64` |
+| Windows x64 | `app-windows-amd64` |
+| Linux x64 | `app-linux-amd64` |
+
+到仓库的 **Actions → build** 里，打开最近一次成功的运行，在 Artifacts 下载。
+
+### 本地构建
 
 ```bash
 go tool mygo dev      # 开发运行，改 .go 自动重启
 go tool mygo build    # 打包到 build/
 ```
 
-## 启动
+需要 Go（见 `go.mod`）和 [Bun](https://bun.sh)（`mygo.config.ts` 由它求值）。不需要 cgo。
 
-`go tool mygo dev` 每次改动都会重新编译并组装 `.app`：热缓存下 `go build` 约 3 秒，整包再多一点。**应用本身启动很轻**（2026-11-12 实测，`startup.log`）：
+## ffmpeg
 
-| 阶段 | 耗时 |
-| --- | --- |
-| 进程启动 → `WhenReady` | 202–236 ms |
-| → 窗口创建 | 253–306 ms |
-| → 扫描完成（3.2 万个文件） | 453–543 ms |
+这些能力需要 ffmpeg：
 
-扫描在后台跑；第二次启动先用上次扫描的结果（`state.json` 里的 `items`），窗口一出现就有内容。开发版把每一步写进 `~/Library/Application Support/MyGo Video Dev/startup.log`。
+- 本地/WebDAV 视频的封面抽帧
+- WebDAV 里 moov 在尾部的 MP4 转 HLS
+- B 站 1080P 的 DASH 双流合成 HLS
+- WebDAV 的时长探测（`ffmpeg -i` 输出里的 `Duration:`）
 
-只想看应用启动速度时，先用 `go tool mygo build` 打包，再直接打开 `build/` 里的 `.app`，就绕开了 dev 的编译。
+查找顺序：
 
-## 图标
+1. 设置 → 工具里选的路径
+2. 应用自带的 `resources/bin/`（打包版内嵌）
+3. `PATH`，以及 Homebrew / MacPorts / 发行版的常见目录
 
-`resources/icon.png`（暖橙，正式版）和 `resources/icon-dev.png`（青色，开发版）由同目录的 `icon.svg` / `icon-dev.svg` 生成：1024×1024，透明边距按 macOS 图标栅格（824 内容区）。`mygo build` 会把它做成 macOS 的 `.icns`、Windows 的图标资源和 Linux 桌面图标。
+没有 ffmpeg 时仍能播放本地视频、IPTV 和 B 站 720P，只是没有缩略图、WebDAV 大文件播不了、1080P 降到 720P。设置 → 工具会显示找到了哪个，也可以手动选。
 
-首次启动会扫描：
+## 内置源
 
-- 应用数据目录下的 `videos/`（macOS：`~/Library/Application Support/dev.pingfury.video/videos`）
-- `~/Movies`
-- `~/Desktop`
-- `~/Downloads`
+内置源和插件一起在侧栏的「插件」页管理：本地视频、WebDAV、IPTV 三张卡，点开就能配置。
 
-把视频放进去，点右上角的重新扫描。
+**WebDAV**：填地址（含路径，如 `https://nas.local:5005/dav`）、用户名和密码。列表和索引会缓存在本地，重启后先用上次的结果。
 
-## 现在能做什么
+**IPTV**：填 M3U/M3U8 的地址或本地路径，保存后按 `group-title` 分组。
 
-- 本地视频库：扫描文件夹，按修改时间排序，识别 `S02E05` 这样的集数
-- 内置 WebDAV：设置里填地址和账号，浏览服务器文件夹，播放视频
-- 内置 IPTV：设置里填 M3U/M3U8 列表（地址或本地文件），按分组浏览直播频道
-- 插件源：数据目录 `plugins/` 下的 JS/TS 插件，接入后出现在侧栏底部的源列表里；播放走本机代理
-- B 站插件：热门、搜索、追番选集、收藏、历史、稍后再看、1080P DASH、弹幕，以及**直播与直播弹幕**（h5 的 HLS 直通，FLV 回退时由代理转 HLS）
-- 封面：用本机 `ffmpeg` 从视频 10 秒处抽帧，640×360 JPEG 缓存在数据目录；列表、详情海报、首页 hero 都用它，没有 ffmpeg 时回退到首字色块
-- 首页：继续观看（全宽 hero）、最近添加
-- 片库：网格
-- 搜索：按文件名、剧名、集数过滤，`⌘F` 聚焦
-- 详情：海报、文件信息、选集、播放进度、从头播放、清除记录
-- 剧集：同名的 `S02E05` 归到同一部剧，详情页选集，播放页切上一集/下一集
-- 播放：系统解码、进度条拖动、音量、10 秒快进/后退、续播、倍速、全屏
-- 连播：一集播完自动接下一集；倍速会记住，下次打开沿用
-- 字幕：自动加载同名的 `.srt` / `.vtt`（含 `.zh.srt`），播放页显示，可开关
-- 控制条：播放时 3 秒不动鼠标淡出，移动鼠标回来
-- 快捷键：`空格` 播放/暂停，`← →` 后退/快进，`↑ ↓` 音量，`C` 字幕，`F` 全屏，`,` `.` 上一集/下一集，`Esc` 退出
+## 开发插件
 
-格式支持取决于系统：MP4 / MOV（H.264 + AAC）在各平台都能播；MKV、WebM、AVI、HEVC 看系统有没有对应解码器。Linux 需要 GStreamer 1.x 及 base 插件。字幕只读外挂文件，不读内嵌字幕轨。
-
-## 插件
-
-插件是一个文件夹，放在应用数据目录下的 `plugins/<id>/`，里面是 `plugin.json` 和一个 JS/TS 模块：
+插件是一个文件夹，里面是 `plugin.json` 和一个 JS/TS 模块：
 
 ```
-~/Library/Application Support/MyGo Video Dev/plugins/demo/
+plugins/<id>/
   plugin.json
   index.js
 ```
 
-`plugin.json` 声明 `id`、`name`、`version`、`description`、`apiVersion`、`main`、`playback` 和权限。模块导出函数，名字就是能力：
+### plugin.json
+
+```json
+{
+  "id": "bilibili",
+  "name": "哔哩哔哩",
+  "version": "0.1.0",
+  "description": "热门、搜索、分 P 与直播。",
+  "apiVersion": 1,
+  "main": "index.js",
+  "playback": "stream",
+  "permissions": { "network": ["api.bilibili.com", "*.bilivideo.com"] },
+  "settings": [{ "key": "cookie", "label": "Cookie", "help": "手动填的登录信息" }],
+  "login": {
+    "url": "https://passport.bilibili.com/login",
+    "cookieHosts": ["bilibili.com"]
+  }
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 唯一标识，也是数据目录名 |
+| `name` / `version` / `description` | 插件页显示 |
+| `apiVersion` | 目前是 `1` |
+| `main` | 入口文件，相对路径 |
+| `playback` | `stream`（直接播）或 `catalog`（目录，正片在官方页播） |
+| `permissions.network` | `fetch` 和播放代理能访问的 host，支持 `*.example.com` 和 `*` |
+| `settings` | 设置项，插件页自动生成输入框 |
+| `login` | 登录页地址，以及登录后要保存哪些域的 Cookie |
+
+### 导出函数
+
+模块导出什么，插件就有什么能力。缺失的导出不会出现在界面上（比如没有 `live` 就没有直播 tab）。
 
 | 导出 | 参数 | 返回 |
 | --- | --- | --- |
@@ -77,97 +148,166 @@ go tool mygo build    # 打包到 build/
 | `browse` | `{page}` | 同上 |
 | `search` | `{query, offset}` | `{videos, more}` |
 | `title` | `{id}` | `{video, episodes}` |
-| `play` | `{id}` | `{url, type, headers, open, duration, drm}` |
-| `progress` | `{id, position, duration, done}` | |
-| `signIn` / `signOut` / `account` | | 账号 |
+| `play` | `{id, quality}` | 见下 |
+| `history` / `favorites` / `following` / `watchLater` | | 同 `home` |
+| `live` | | 同 `home`，卡片带 LIVE |
+| `liveDanmaku` | `{id}` | 启动直播弹幕后返回 |
+| `stopLive` | | 停止直播弹幕 |
+| `danmaku` | `{id}` | `{cues: [{time, text, color, mode}]}` |
+| `progress` | `{id, position, duration, done}` | 上报进度 |
+| `account` / `signIn` / `signOut` | | 账号 |
 
-`permissions.network` 同时限制 `fetch` 和本机代理能访问的 host。`play` 返回 `open` 时在浏览器打开；返回 `drm` 时应用明确拒绝播放。
+`videos` 的字段：
 
-复制插件文件夹到数据目录的 `plugins/`，或在「插件」页安装：从文件夹、zip，或 GitHub 仓库。
+```js
+{
+  id: "BV1xx",          // play 收到的 id
+  name: "标题",
+  poster: "https://...", // 受网络权限限制
+  overview: "简介",
+  duration: 120000,      // 毫秒
+  series: "剧名",        // 可选，用于分组
+  season: 1, episode: 2, // 可选
+  live: false            // 直播卡片
+}
+```
 
-**插件默认是停用的**：新装的插件不会加载，也不会出现在侧栏的源列表里。到侧栏的「插件」页打开开关后，它才会成为可选来源。停用会关掉插件的 JS 运行时并断开它的网络访问，设置、账号和播放记录保留。
+`play` 的返回：
 
-插件页里能做：
+```js
+// 直接给流，走本机代理
+{ url, type: "mp4" | "hls", headers: { Referer, "User-Agent", Cookie }, duration }
 
-- **安装插件…**：从三种地方装
-  - **文件夹**：选一个含 `plugin.json` 的文件夹
-  - **zip**：解压后找 `plugin.json`，拒绝跑到目录外的路径
-  - **GitHub**：填 `owner/repo` 或仓库地址，取最新 release 里适合本平台的 zip；没有 release 就用默认分支
-- **启用 / 停用**：卡片右侧的开关；启用失败会标出原因，可以重试
-- **设置项**：manifest 的 `settings` 在展开卡片里变成输入框，改完即保存
-- **账号**：`登录` / `退出`，调插件的 `signIn` / `signOut` / `account`
-- **卸载**：展开卡片后两次确认，删除插件目录
-- **海报**：从 `poster` 字段加载网络图片，受 `permissions.network` 限制
+// DASH：画面和声音分开，代理合成 HLS
+{ type: "dash", dash: { video, audio }, headers, quality: "1080P" }
 
-## ffmpeg
+// 让系统浏览器打开
+{ open: "https://www.bilibili.com/video/BV1xx" }
 
-抽帧、把 WebDAV 里 moov 在尾部的 MP4 转成 HLS、合成 B 站 1080P 的 DASH，都需要 ffmpeg。查找顺序：
+// 明确拒绝
+{ drm: "widevine" }
+```
 
-1. 设置 → 工具里选的路径
-2. 应用自带的 `resources/bin/`（打包版内嵌）
-3. `PATH`
+`play.type == "flv"` 也会被代理转成 HLS（直播用）。
 
-设置 → 工具会显示找到了哪个，也可以手动选。没有 ffmpeg 时仍能播放本地视频和 IPTV，只是没有缩略图、WebDAV 大文件播不了、B 站降到 720P。
+### host API
 
-CI 会按平台下载 ffmpeg，放进 `resources/<platform>/bin/`，再由 `mygo build` 打进安装包（见 `.github/workflows/build.yml`）。
+插件里可以用的全局对象：
 
-## 内置源
+| 调用 | 说明 |
+| --- | --- |
+| `fetch(url, options)` | 标准 fetch，受 `permissions.network` 限制 |
+| `host.setting(key)` | 读设置项 |
+| `host.storage.get/set/remove(key)` | 插件自己的持久化，JSON |
+| `host.cookie()` | app 为这个插件保存的 Cookie 头 |
+| `host.emitDanmaku({text, color})` | 把一条直播弹幕交给播放器 |
+| `host.wsOpen(url, headers)` / `host.wsOn` / `host.wsSend` / `host.wsClose` | WebSocket（受网络权限限制） |
+| `host.inflate(bytes)` | zlib 解压 |
+| `host.crypto.md5(text)` | MD5（B 站 wbi 签名用） |
+| `host.openURL(url)` | 用系统浏览器打开 |
+| `host.platform` / `host.arch` / `host.dir` / `host.dataDir` | 运行环境 |
+| `host.ffmpeg` | 是否有 ffmpeg，用来决定要不要请求 DASH |
 
-内置源和插件一起在侧栏的「插件」页管理：本地视频、WebDAV、IPTV 三张卡，点开就能配置。设置页只留播放和关于。
+`setTimeout` / `setInterval`、`TextEncoder`、`TextDecoder`、`TypedArray`、`ArrayBuffer` 都可用。
 
-WebDAV：填地址（含路径，如 `https://nas.local:5005/dav`）、用户名和密码。保存后侧栏底部出现「WebDAV」，可以：
+### 登录
 
-- 浏览文件夹，面包屑返回上级
-- 播放里面的视频，走本机代理带上 Basic Auth
-- 进度存在本地，和本地视频一样续播
+插件在 `login` 里声明登录页和要保存 Cookie 的域：
 
-## 结构
+```json
+"login": { "url": "https://passport.bilibili.com/login", "cookieHosts": ["bilibili.com"] }
+```
+
+插件页点「登录」后：
+
+1. app 在内嵌 WebView 里打开这个页面，用户在官方页面里扫码或登录
+2. 点「我已完成登录」，app 只挑 `cookieHosts` 匹配的域，写进 `plugin-data/<id>/cookies.json`（0600）
+3. 之后插件用 `host.cookie()` 拿到这个 Cookie 头，自己放进请求
+4. 「退出登录」会删掉这份 Cookie 并调插件的 `signOut`
+
+app 不接触密码，也不把 Cookie 给别的插件。
+
+### 生命周期与调试
+
+```
+安装            → 默认停用
+插件页打开开关   → plugin.Load：编译 JS
+第一次调用       → 启动 VM
+停用            → Close：关 VM、断网络；设置和账号保留
+调用超时        → 30 秒；无响应判卡死，重启运行时
+```
+
+- 开发时把插件放进数据目录的 `plugins/<id>/`，在插件页启用即可
+- 改了代码，点插件页的「重新加载」
+- 运行日志看 `diag.log`（数据目录下）和 `go tool mygo dev` 的终端
+- `host.ffmpeg` 告诉插件有没有 ffmpeg，可以据此降级（B 站就降到了 720P）
+
+完整示例见 [`examples/bilibili-plugin`](examples/bilibili-plugin)：热门、搜索、分 P、追番选集、收藏、历史、直播、弹幕、登录、1080P。
+
+## 数据目录
+
+macOS（开发版）：
+
+```
+~/Library/Application Support/MyGo Video Dev/
+  state.json          进度、音量、源选择、插件开关、工具路径
+  webdav-cache.json   WebDAV 目录与索引缓存
+  thumbs/             封面帧
+  plugins/<id>/       插件
+  plugin-data/<id>/   插件的设置、storage、cookies.json
+  diag.log            诊断日志
+```
+
+正式版把 `MyGo Video Dev` 换成 `MyGo Video`。
+
+## 项目结构
 
 ```
 main.go
 internal/
-  app/          视图与状态：侧栏、首页、详情、播放、搜索、设置
+  app/          视图与状态：侧栏、首页、详情、播放、搜索、插件页、设置
   local/        本地库：扫描、文件名解析
-  media/        领域模型：视频、进度、时长格式化
-  plugin/       JS/TS 插件宿主：manifest、moejs、host API
-  store/        进度、音量、扫描目录（JSON）
+  media/        领域模型：视频、进度、时长
+  plugin/       JS/TS 宿主：manifest、moejs、host API、WebSocket
+  store/        进度、音量、源选择、插件状态（JSON）
   subtitle/     SRT / VTT 解析
-  thumb/        ffmpeg 抽帧，缩略图缓存
-  streamproxy/  本机代理：请求头注入、HLS 重写、AES-128 解密
-  webdav/       WebDAV 客户端：PROPFIND、Basic Auth
-  iptv/         M3U/M3U8 播放列表解析
+  thumb/        ffmpeg 抽帧
+  ffbin/        查找 ffmpeg（设置 / 自带 / PATH）
+  streamproxy/  本机代理：请求头注入、HLS 重写、AES-128、DASH/FLV 转 HLS
+  webdav/       PROPFIND、Basic Auth
+  iptv/         M3U/M3U8 解析
+examples/
+  bilibili-plugin/
 docs/
-  PLAN.md        学习笔记、架构、插件协议、里程碑
-  PLUGIN-API.md  插件协议草案
-designs/
-  mygo-video/    界面设计稿（可交互 HTML）
+  PLAN.md        架构与里程碑
+  PLUGIN-API.md  插件协议
+  screens/       README 的截图
+designs/         可交互的界面设计稿
 ```
 
-## 设计
-
-界面稿：`designs/mygo-video/index.html`，说明见 `designs/mygo-video/DESIGN-NOTES.md`。
-
-预览：
+## 开发
 
 ```bash
-python3 -m http.server 4311 --directory designs
-# http://localhost:4311/mygo-video/index.html
+go test ./...                                  # 单元测试
+SHOTS=/tmp/shots go test ./internal/app -run TestShots   # 渲染各页面成 PNG
+NETWORK=1 go test ./internal/plugin -run TestBilibili     # 打真实接口（需要 BILI_COOKIE）
+```
+
+设计稿：
+
+```bash
+open designs/mygo-video/index.html
 ```
 
 ## 已知限制
 
-- 插件是首版：安装支持文件夹 / zip / GitHub 仓库，没有商店与签名校验；账号只做了 `signIn` / `signOut`，没有二维码与内嵌登录页
-- 封面只是正片里的一帧，不是刮削来的海报；没有 `ffmpeg` 时回退到首字色块
-- 字幕只读外挂的 `.srt` / `.vtt`，不读内嵌字幕轨，也不支持 ASS 样式
-- 没有弹幕（等插件来源）
-- 没有画中画（原生窗口没有 PiP）
+- 插件没有商店与签名校验，安装前请确认来源
+- 封面是正片里的一帧，不是刮削来的海报；没有 ffmpeg 时回退到首字色块
+- 字幕只读外挂 `.srt` / `.vtt`，不读内嵌轨，也不支持 ASS 样式
+- B 站直播弹幕用轮询（官方 WebSocket 拒绝非官方客户端），延迟约 2 秒
 - 受 DRM 保护的内容无法播放，这是有意为之
+- 只播放你有权访问的内容
 
 ## 下一步
 
-1. M2 插件宿主：`plugin.json`、moejs 运行时、host API、设置与安装
-2. M3 本机代理：请求头注入、HLS 重写、AES-128、Range
-3. M4 字幕与弹幕
-4. M5 腾讯/优酷的 L2 适配器（目录 + 唤起官方播放）
-
-见 [docs/PLAN.md](docs/PLAN.md)。
+见 [docs/PLAN.md](docs/PLAN.md)。近期方向：腾讯/优酷的 L2 目录适配、插件商店、弹幕样式设置。
