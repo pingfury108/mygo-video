@@ -1,0 +1,16 @@
+{
+  "id": "youku",
+  "name": "优酷",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "main": "index.js",
+  "description": "搜索优酷，正片在官方页播放。目录与入口在本应用里，播放交给浏览器。",
+  "playback": "stream",
+  "permissions": {
+    "network": [
+      "search.youku.com",
+      "so.youku.com",
+      "v.youku.com"
+    ]
+  }
+}
