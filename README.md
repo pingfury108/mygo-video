@@ -4,7 +4,7 @@
 
 本地库、WebDAV、IPTV，以及一个能接入视频站点的插件系统——B 站插件支持热门、搜索、追番选集、收藏、历史、稍后再看、1080P DASH、弹幕，以及**直播和直播弹幕**。
 
-![首页](docs/screens/home.jpg)
+![搜索](docs/screens/search.jpg)
 
 ## 功能
 
@@ -40,12 +40,7 @@
 ## 截图
 
 <p>
-  <img src="docs/screens/player.jpg" width="49%" alt="直播播放与弹幕">
-  <img src="docs/screens/search.jpg" width="49%" alt="搜索">
-</p>
-<p>
-  <img src="docs/screens/library.jpg" width="49%" alt="片库">
-  <img src="docs/screens/settings.jpg" width="49%" alt="设置">
+  <img src="docs/screens/settings.jpg" width="70%" alt="设置与工具">
 </p>
 
 ## 安装
