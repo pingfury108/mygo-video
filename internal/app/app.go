@@ -802,6 +802,7 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	}
 	a.player = p
 	a.playing = it
+	a.current = it
 	a.playingQuality = ""
 	a.danmaku = nil
 	a.playStarted = time.Now()
@@ -831,7 +832,8 @@ func (a *app) leavePlayer() {
 	a.seek = 0
 	a.drawer = false
 	a.uiHidden = false
-	if a.playing.Source == "iptv" {
+	// A live channel has no page of its own to go back to.
+	if a.playing.Live || a.playing.Source == "iptv" {
 		a.route = pageHome
 	} else {
 		a.route = pageDetail
