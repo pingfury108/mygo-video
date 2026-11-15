@@ -2,6 +2,7 @@ package app
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -10,9 +11,6 @@ import (
 	"mygo-video/internal/media"
 	"mygo-video/internal/plugin"
 )
-
-// danmakuLife is how long a comment flies across the video.
-const danmakuLife = 9 * time.Second
 
 // loadDanmaku asks the plugin for the comments of a video.
 func (a *app) loadDanmaku(it media.Item) {
@@ -43,17 +41,27 @@ func (a *app) danmakuLayer(c *ui.Context) {
 	if !a.danmakuOn || len(a.danmaku) == 0 || a.player == nil {
 		return
 	}
+	prefs := a.danmakuPrefs.WithDefaults()
+	life := time.Duration(prefs.Speed * float64(time.Second)).Milliseconds()
+	font := float32(prefs.Size)
+	rowH := font + 12
+	alpha := float32(prefs.Opacity)
 	pos := a.playhead().Milliseconds()
 	width, height := c.Size()
+	rows := int(float64(height) * prefs.Area / float64(rowH))
+	rows = max(min(rows, 20), 3)
 	ui.Box(c).Fill().IgnoreInput(true).Children(func() {
 		start := sort.Search(len(a.danmaku), func(i int) bool {
-			return a.danmaku[i].Time > pos-int64(danmakuLife/time.Millisecond)
+			return a.danmaku[i].Time > pos-life
 		})
 		shown := 0
 		for i := start; i < len(a.danmaku) && shown < 90; i++ {
 			cue := a.danmaku[i]
 			age := pos - cue.Time
-			if age < 0 || age > danmakuLife.Milliseconds() {
+			if age < 0 || age > life {
+				continue
+			}
+			if blockedWord(cue.Text, prefs.Block) {
 				continue
 			}
 			// 4 stays at the bottom, 5 at the top, for a shorter while;
@@ -62,30 +70,49 @@ func (a *app) danmakuLayer(c *ui.Context) {
 			if fixed && age > 4000 {
 				continue
 			}
-			x := float64(width) - float64(age)*0.11
+			// The speed is the time to cross, so a wider picture moves
+			// the comments a little faster.
+			x := float64(width) - float64(age)*(float64(width)+600)/float64(life)
 			// Rows go by what shows now, not by how many comments the video
 			// has had: a live chat would otherwise start halfway down.
-			top := float32(56 + (shown%10)*26)
+			top := 56 + float32((shown%rows)*int(rowH))
 			if fixed {
 				x = float64(width) * 0.34
 				if cue.Mode == 4 {
-					top = height - float32(110+(shown%3)*26)
+					top = height - (110 + float32((shown%3)*int(rowH)))
 				} else {
-					top = 56 + float32((shown%3)*26)
+					top = 56 + float32((shown%3)*int(rowH))
 				}
 			}
 			if x < -500 {
 				continue
 			}
 			shown++
-			color := ui.RGBA(255, 255, 255, 0.92)
+			color := ui.RGBA(255, 255, 255, alpha)
 			if cue.Color != "" && cue.Color != "#ffffff" {
 				color = ui.Hex(cue.Color)
 			}
-			ui.Text(c, cue.Text).FontSize(14).TextColor(color).
+			ui.Text(c, cue.Text).FontSize(font).TextColor(color).
 				Absolute().Left(float32(x)).Top(top).IgnoreInput(true)
 		}
 	})
+}
+
+// blockedWord reports whether a comment holds one of the words to drop.
+func blockedWord(text, words string) bool {
+	for _, w := range strings.Split(words, ",") {
+		w = strings.TrimSpace(w)
+		if w != "" && strings.Contains(text, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// saveDanmaku keeps how the comments look.
+func (a *app) saveDanmaku() {
+	a.store.SetDanmaku(a.danmakuPrefs)
+	a.invalidate()
 }
 
 // toggleDanmaku turns the comments on or off.

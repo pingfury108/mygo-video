@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
@@ -33,6 +35,35 @@ func (a *app) settingsPage(c *ui.Context) {
 				fact(c, "← →", "后退 / 快进 10 秒")
 				fact(c, "↑ ↓", "音量")
 				fact(c, "Esc", "退出播放")
+			})
+
+			settingsCard(c, "弹幕", func() {
+				a.danmakuPrefs = a.danmakuPrefs.WithDefaults()
+				ui.Text(c, "弹幕来自插件，这里调的是显示方式。").
+					FontSize(11.5).TextColor(p.faint)
+				a.danmakuChoice(c, "字号", []float64{12, 14, 18}, []string{"小", "中", "大"},
+					a.danmakuPrefs.Size, func(v float64) { a.danmakuPrefs.Size = v })
+				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "不透明度").FontSize(11.5).TextColor(p.muted).Width(64)
+					op := a.danmakuPrefs.Opacity
+					if v := ui.Slider(c, &op, 0.3, 1).Width(180); v.Changed() {
+						a.danmakuPrefs.Opacity = op
+						a.saveDanmaku()
+					}
+					ui.Text(c, fmt.Sprintf("%d%%", int(op*100))).FontSize(11).TextColor(p.faint)
+				})
+				a.danmakuChoice(c, "速度", []float64{12, 9, 6}, []string{"慢", "中", "快"},
+					a.danmakuPrefs.Speed, func(v float64) { a.danmakuPrefs.Speed = v })
+				a.danmakuChoice(c, "显示区域", []float64{0.33, 0.5, 1}, []string{"三分之一", "半屏", "全屏"},
+					a.danmakuPrefs.Area, func(v float64) { a.danmakuPrefs.Area = v })
+				ui.Column(c).Gap(4).Children(func() {
+					ui.Text(c, "屏蔽词").FontSize(11.5).TextColor(p.muted)
+					if v := ui.TextInput(c, &a.danmakuPrefs.Block).
+						Placeholder("用逗号分开，比如 剧透,广告").
+						Height(32).MaxWidth(460); v.Changed() {
+						a.saveDanmaku()
+					}
+				})
 			})
 
 			settingsCard(c, "关于", func() {
@@ -94,6 +125,24 @@ func (a *app) detectTools() {
 	}
 	a.say("ffmpeg：%s", state)
 	a.invalidate()
+}
+
+// danmakuChoice is one segmented row over a numeric setting.
+func (a *app) danmakuChoice(c *ui.Context, label string, values []float64, labels []string, current float64, set func(float64)) {
+	p := colors()
+	idx := 0
+	for i, v := range values {
+		if v == current {
+			idx = i
+		}
+	}
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, label).FontSize(11.5).TextColor(p.muted).Width(64)
+		if v := ui.Segmented(c, &idx, labels...); v.Changed() {
+			set(values[idx])
+			a.saveDanmaku()
+		}
+	})
 }
 
 func settingsCard(c *ui.Context, title string, body func()) {

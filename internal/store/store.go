@@ -32,6 +32,40 @@ type Data struct {
 	Source  SourceID               `json:"source,omitempty"`
 	Plugins map[string]PluginState `json:"plugins,omitempty"`
 	Tools   Tools                  `json:"tools,omitempty"`
+	Danmaku DanmakuPrefs           `json:"danmaku,omitempty"`
+}
+
+// DanmakuPrefs is how the comments look: how big, how solid, how fast, and
+// how much of the picture they cover. Block holds words to drop, comma
+// separated.
+type DanmakuPrefs struct {
+	Opacity float64 `json:"opacity,omitempty"`
+	Size    float64 `json:"size,omitempty"`
+	Speed   float64 `json:"speed,omitempty"`
+	Area    float64 `json:"area,omitempty"`
+	Block   string  `json:"block,omitempty"`
+}
+
+// normalize fills in what an older file or a fresh one leaves out.
+func (d *DanmakuPrefs) normalize() {
+	if d.Opacity <= 0 {
+		d.Opacity = 0.92
+	}
+	if d.Size <= 0 {
+		d.Size = 14
+	}
+	if d.Speed <= 0 {
+		d.Speed = 9
+	}
+	if d.Area <= 0 {
+		d.Area = 0.5
+	}
+}
+
+// WithDefaults is normalize for a value not read from the file yet.
+func (d DanmakuPrefs) WithDefaults() DanmakuPrefs {
+	d.normalize()
+	return d
 }
 
 // Tools are the programs the listener named.
@@ -130,6 +164,7 @@ func Open(dir string) (*Store, error) {
 	if s.data.Plugins == nil {
 		s.data.Plugins = map[string]PluginState{}
 	}
+	s.data.Danmaku.normalize()
 	return s, nil
 }
 
@@ -280,6 +315,24 @@ func (s *Store) Tools() Tools {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.data.Tools
+}
+
+// Danmaku is how the comments look.
+func (s *Store) Danmaku() DanmakuPrefs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := s.data.Danmaku
+	d.normalize()
+	return d
+}
+
+// SetDanmaku keeps how the comments look.
+func (s *Store) SetDanmaku(d DanmakuPrefs) {
+	d.normalize()
+	s.mu.Lock()
+	s.data.Danmaku = d
+	s.mu.Unlock()
+	s.Save()
 }
 
 // SetTool keeps where ffmpeg is.

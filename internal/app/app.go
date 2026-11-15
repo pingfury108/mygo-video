@@ -140,6 +140,8 @@ type app struct {
 	danmaku     []plugin.Cue
 	danmakuOn   bool
 	danmakuBusy bool
+	// danmakuPrefs is how they look, kept in the store.
+	danmakuPrefs store.DanmakuPrefs
 
 	// detailEpisodes are the parts or episodes a plugin lists for the
 	// video its detail page shows.
@@ -260,6 +262,7 @@ func (a *app) start() {
 	a.dataDir = dir
 	a.mark("ready", processStart)
 	a.volume = st.Volume()
+	a.danmakuPrefs = st.Danmaku()
 	roots := st.Roots()
 	if len(roots) == 0 {
 		roots = defaultRoots(dir)
