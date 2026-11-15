@@ -695,7 +695,30 @@ func (a *app) play(it media.Item, fromStart bool) {
 	}
 	a.subs = subtitle.Load(it.Path)
 	a.subsOn = len(a.subs) > 0
+	if len(a.subs) == 0 && a.ffmpeg != "" {
+		a.extractSubs(it)
+	}
 	a.beginPlayback(it, p, fromStart)
+}
+
+// extractSubs takes the first subtitle track ffmpeg finds inside the video,
+// for files that carry one instead of a file beside them.
+func (a *app) extractSubs(it media.Item) {
+	ffmpeg, id, path := a.ffmpeg, it.ID, it.Path
+	go func() {
+		cues := subtitle.Extract(path, ffmpeg)
+		if len(cues) == 0 {
+			return
+		}
+		mygo.RunOnMain(func() {
+			if a.playing.ID != id || len(a.subs) > 0 {
+				return
+			}
+			a.subs = cues
+			a.subsOn = true
+			a.invalidate()
+		})
+	}()
 }
 
 // playPlugin asks the plugin for a stream and plays it through the proxy,

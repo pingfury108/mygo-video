@@ -3,7 +3,10 @@
 package subtitle
 
 import (
+	"bytes"
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -44,6 +47,12 @@ func Find(video string) string {
 		base + ".chs.srt",
 		base + ".chi.srt",
 		base + ".en.srt",
+		base + ".ass",
+		base + ".ssa",
+		base + ".zh.ass",
+		base + ".zh-CN.ass",
+		base + ".chs.ass",
+		base + ".zh.ssa",
 		base + ".zh.vtt",
 	}
 	for _, path := range candidates {
@@ -67,9 +76,12 @@ func At(cues []Cue, d time.Duration) string {
 
 var markup = regexp.MustCompile(`<[^>]*>|\{\\[^}]*\}`)
 
-// Parse reads SRT or WebVTT cues.
+// Parse reads SRT, WebVTT, or the Dialogue lines of ASS and SSA.
 func Parse(data []byte) []Cue {
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	if strings.Contains(text, "[Events]") && strings.Contains(text, "Dialogue:") {
+		return parseASS(text)
+	}
 	var cues []Cue
 	var cur *Cue
 	flush := func() {
@@ -108,6 +120,87 @@ func Parse(data []byte) []Cue {
 	}
 	flush()
 	return cues
+}
+
+// parseASS reads the Dialogue lines of an ASS or SSA script, taking the
+// times and the text and leaving the styling to the reader.
+func parseASS(text string) []Cue {
+	var cues []Cue
+	inEvents := false
+	var format []string
+	field := func(name string) int {
+		for i, f := range format {
+			if f == name {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		switch {
+		case strings.EqualFold(line, "[Events]"):
+			inEvents = true
+			continue
+		case strings.HasPrefix(line, "["):
+			inEvents = false
+			continue
+		}
+		if !inEvents {
+			continue
+		}
+		if strings.HasPrefix(line, "Format:") {
+			format = nil
+			for _, f := range strings.Split(strings.TrimPrefix(line, "Format:"), ",") {
+				format = append(format, strings.ToLower(strings.TrimSpace(f)))
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "Dialogue:") || len(format) == 0 {
+			continue
+		}
+		// The text is the last field and may hold commas of its own.
+		fields := strings.SplitN(strings.TrimPrefix(line, "Dialogue:"), ",", len(format))
+		iStart, iEnd, iText := field("start"), field("end"), field("text")
+		if iStart < 0 || iEnd < 0 || iText < 0 || iText >= len(fields) {
+			continue
+		}
+		start, okStart := parseTime(fields[iStart])
+		end, okEnd := parseTime(fields[iEnd])
+		if !okStart || !okEnd {
+			continue
+		}
+		body := fields[iText]
+		body = strings.ReplaceAll(body, `\N`, "\n")
+		body = strings.ReplaceAll(body, `\n`, "\n")
+		body = strings.ReplaceAll(body, `\h`, " ")
+		body = strings.TrimSpace(markup.ReplaceAllString(body, ""))
+		if body == "" || end <= start {
+			continue
+		}
+		cues = append(cues, Cue{Start: start, End: end, Text: body})
+	}
+	return cues
+}
+
+// Extract asks ffmpeg for the first subtitle track inside a video, when
+// there is no file beside it. It returns none if there is no such track or
+// no ffmpeg.
+func Extract(video, ffmpeg string) []Cue {
+	if ffmpeg == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ffmpeg,
+		"-v", "error", "-i", video,
+		"-map", "0:s:0", "-f", "srt", "pipe:1")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+	return Parse(out.Bytes())
 }
 
 // parseTime reads 00:00:01,000, 00:01.000 or 01:02. Split from anything

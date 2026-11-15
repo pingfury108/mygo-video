@@ -63,3 +63,35 @@ func TestAt(t *testing.T) {
 		t.Errorf("at 6s: %q", got)
 	}
 }
+
+const sampleASS = `[Script Info]
+Title: test
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, Bold
+Style: Default,Arial,20,&H00FFFFFF,0
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:04.50,Default,,0,0,0,,第一行, 带逗号
+Dialogue: 0,0:00:05.00,0:00:08.00,Default,,0,0,0,,{\an8}顶部\N换行
+`
+
+func TestParseASS(t *testing.T) {
+	cues := Parse([]byte(sampleASS))
+	if len(cues) != 2 {
+		t.Fatalf("cues %d, want 2", len(cues))
+	}
+	if cues[0].Start != time.Second || cues[0].End != 4500*time.Millisecond {
+		t.Errorf("first cue %v–%v", cues[0].Start, cues[0].End)
+	}
+	if cues[0].Text != "第一行, 带逗号" {
+		t.Errorf("first text %q", cues[0].Text)
+	}
+	if cues[1].Text != "顶部\n换行" {
+		t.Errorf("second text %q", cues[1].Text)
+	}
+	if got := At(cues, 6*time.Second); got != "顶部\n换行" {
+		t.Errorf("at 6s: %q", got)
+	}
+}
