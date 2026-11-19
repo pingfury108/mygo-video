@@ -362,6 +362,14 @@ func (a *app) start() {
 
 	a.proxy, _ = streamproxy.New()
 	streamproxy.Log = func(msg string) { a.diag("%s", msg) }
+	streamproxy.TempDir = filepath.Join(dir, "tmp")
+	_ = os.MkdirAll(streamproxy.TempDir, 0o700)
+	// What a run that ended without closing its streams left behind.
+	if old, err := filepath.Glob(filepath.Join(streamproxy.TempDir, "mygo-video-hls-*")); err == nil {
+		for _, d := range old {
+			_ = os.RemoveAll(d)
+		}
+	}
 	a.retryStage = map[string]int{}
 	a.diag("version=%s os=%s/%s", mygo.App.Version(), runtime.GOOS, runtime.GOARCH)
 	go a.logTools()

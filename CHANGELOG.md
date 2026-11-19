@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.8
+
+- HLS parts are served as `video/mp2t`: Media Foundation turns down a TS
+  part sent as `video/mp4`, and waits forever instead of saying so, which
+  is why a remuxed or transcoded file never started on Windows.
+- The playlist is waited for 8 seconds rather than 20, so a player that
+  cannot start says so and the app tries the next way in.
+- HLS parts go in the data directory's `tmp/` instead of the system's
+  temporary directory, so a data directory on another drive holds them too.
+  Leftovers of a run that ended are removed at launch.
+- Only the version before gets a delta update, which keeps the release page
+  short while the app is young.
+
 ## 0.1.7
 
 - HLS segments are MPEG-TS: Media Foundation plays those, not the fMP4

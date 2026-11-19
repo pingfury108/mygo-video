@@ -392,8 +392,20 @@ func moovBeforeMdat(data []byte) bool {
 
 // startHLS makes the file's parts as HLS, which the player streams from a
 // playlist that grows as they come.
+// TempDir is where HLS parts are written, an empty string for the system's
+// temporary directory. The app points it at its data directory, so the drive
+// the listener chose holds them too.
+var TempDir string
+
+func tempRoot() string {
+	if TempDir != "" {
+		return TempDir
+	}
+	return os.TempDir()
+}
+
 func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
-	dir, err := os.MkdirTemp("", "mygo-video-hls-")
+	dir, err := os.MkdirTemp(tempRoot(), "mygo-video-hls-")
 	if err != nil {
 		return nil, err
 	}
@@ -484,7 +496,10 @@ func (p *Proxy) serveHLS(w http.ResponseWriter, r *http.Request, s *Stream, name
 	name = filepath.Base(name)
 	path := filepath.Join(s.hls.dir, name)
 	if strings.HasSuffix(name, ".m3u8") {
-		deadline := time.Now().Add(20 * time.Second)
+		// The first part comes once ffmpeg has read the few seconds it
+		// holds; a player that waits here longer than that is better off
+		// with an error, which makes the app try the next way in.
+		deadline := time.Now().Add(8 * time.Second)
 		for {
 			if _, err := os.Stat(path); err == nil {
 				break
@@ -500,6 +515,10 @@ func (p *Proxy) serveHLS(w http.ResponseWriter, r *http.Request, s *Stream, name
 			}
 		}
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	} else if strings.HasSuffix(name, ".ts") {
+		// Media Foundation reads the type of a part, and turns down a TS
+		// part sent as video/mp4.
+		w.Header().Set("Content-Type", "video/mp2t")
 	} else {
 		w.Header().Set("Content-Type", "video/mp4")
 	}
