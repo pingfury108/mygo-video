@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3
+
+- A "Check for Updates…" item in the app menu, and on Windows and Linux in
+  a menu bar, which shows the update window at once.
+
 ## 0.1.2
 
 - Windows: the app draws its own minimize, maximize and close buttons, so

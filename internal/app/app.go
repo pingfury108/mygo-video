@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/video"
@@ -261,6 +262,7 @@ func Run() error {
 	// The update window Sparkle made familiar, in native UI: it checks
 	// the GitHub releases of the app and installs a newer one.
 	mygo.Use(native.Plugin)
+	setupMenu()
 	a := &app{danmakuOn: true}
 	// A second launch hands its command line over and exits; bring the
 	// window the first one holds back to the front, or the launch looks
@@ -277,6 +279,30 @@ func Run() error {
 	mygo.App.WhenReady(a.start)
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.shutdown() })
 	return mygo.App.Run()
+}
+
+// setupMenu gives the app a menu holding the update check: macOS puts it in
+// the app menu, Windows and Linux in a menu bar.
+func setupMenu() {
+	appMenu := []*mygo.MenuItem{
+		updater.MenuItem(),
+		mygo.Separator(),
+		{Role: mygo.RoleQuit},
+	}
+	if runtime.GOOS == "darwin" {
+		appMenu = []*mygo.MenuItem{
+			{Role: mygo.RoleAbout},
+			updater.MenuItem(),
+			mygo.Separator(),
+			{Role: mygo.RoleHide},
+			{Role: mygo.RoleHideOthers},
+			mygo.Separator(),
+			{Role: mygo.RoleQuit},
+		}
+	}
+	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+		{Label: appName, Submenu: appMenu},
+	}))
 }
 
 func (a *app) start() {
