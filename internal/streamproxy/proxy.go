@@ -10,6 +10,7 @@
 package streamproxy
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/aes"
@@ -66,7 +67,6 @@ type hlsJob struct {
 	dir    string
 	cancel context.CancelFunc
 	cmd    *exec.Cmd
-	stderr bytes.Buffer
 }
 
 // Proxy hands streams to the player over loopback.
@@ -188,15 +188,16 @@ func (p *Proxy) Forget(token string) {
 	stopHLS(s)
 }
 
+// Log is where the proxy reports what ffmpeg said. The app points it at its
+// diagnostic log, which a windowed program can read after the fact.
+var Log = func(msg string) { log.Printf("streamproxy: %s", msg) }
+
 func stopHLS(s *Stream) {
 	if s == nil || s.hls == nil {
 		return
 	}
 	s.hls.cancel()
 	_ = s.hls.cmd.Wait()
-	if msg := strings.TrimSpace(s.hls.stderr.String()); msg != "" {
-		log.Printf("streamproxy: %s", msg)
-	}
 	_ = os.RemoveAll(s.hls.dir)
 }
 
@@ -407,12 +408,8 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	if live {
 		args = append(args, "-fflags", "nobuffer", "-analyzeduration", "0", "-probesize", "524288")
 	}
-	// A file the system's player has no decoder for is transcoded: decode
-	// on the GPU where there is one, encode with x264.
+	// A file the system's player has no decoder for is transcoded.
 	transcode := s.Type == "transcode"
-	if transcode {
-		args = append(args, "-hwaccel", "auto")
-	}
 	addInput := func(u string) {
 		if h := headerLines(s.Headers); h != "" {
 			args = append(args, "-headers", h)
@@ -440,9 +437,10 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		"-f", "hls",
 		"-hls_time", hlsTime,
 		"-hls_playlist_type", "event",
-		"-hls_segment_type", "fmp4",
-		"-hls_fmp4_init_filename", "init.mp4",
-		"-hls_segment_filename", filepath.Join(dir, "seg%05d.m4s"),
+		// MPEG-TS rather than fMP4: Media Foundation plays HLS of TS
+		// segments, not of fMP4 ones.
+		"-hls_segment_type", "mpegts",
+		"-hls_segment_filename", filepath.Join(dir, "seg%05d.ts"),
 		"-hls_flags", "independent_segments",
 		filepath.Join(dir, "index.m3u8"),
 	)
@@ -451,12 +449,28 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	cmd := exec.CommandContext(ctx, s.FFmpeg, args...)
 	executil.Hide(cmd)
 	job.cmd = cmd
-	cmd.Stderr = &job.stderr
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	Log("hls " + strings.Join(args, " "))
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
+	// What ffmpeg says goes to the log as it comes, not only at the end:
+	// a file it cannot decode says why there.
+	go func() {
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			if line := strings.TrimSpace(sc.Text()); line != "" {
+				Log("ffmpeg: " + line)
+			}
+		}
+	}()
 	return job, nil
 }
 

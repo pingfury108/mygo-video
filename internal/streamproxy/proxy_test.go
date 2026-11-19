@@ -300,17 +300,8 @@ func TestHLSRemux(t *testing.T) {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK && strings.Contains(string(body), "#EXTM3U") {
-				if !strings.Contains(string(body), ".m4s") {
+				if !strings.Contains(string(body), ".ts") {
 					t.Fatalf("no parts: %s", body)
-				}
-				base := strings.TrimSuffix(u, "index.m3u8")
-				init, err := http.Get(base + "init.mp4")
-				if err != nil {
-					t.Fatal(err)
-				}
-				init.Body.Close()
-				if init.StatusCode != http.StatusOK {
-					t.Fatalf("init %d", init.StatusCode)
 				}
 				return
 			}
@@ -364,7 +355,7 @@ func TestHLSRemuxDash(t *testing.T) {
 		if err == nil {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK && strings.Contains(string(body), ".m4s") {
+			if resp.StatusCode == http.StatusOK && strings.Contains(string(body), ".ts") {
 				break
 			}
 		}

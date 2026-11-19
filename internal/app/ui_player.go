@@ -77,6 +77,10 @@ func (a *app) playerPage(c *ui.Context) {
 		a.playerControls(c)
 		a.episodeDrawer(c)
 		if err := pl.Err(); err != nil {
+			if a.errLogged != a.playing.ID {
+				a.errLogged = a.playing.ID
+				a.diag("player error item=%s err=%v", a.playing.ID, err)
+			}
 			if a.canRetry() {
 				msg := "正在换一种方式打开…"
 				if a.retryStage[a.playing.ID] >= 2 {

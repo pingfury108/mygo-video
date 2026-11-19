@@ -72,6 +72,9 @@ func (a *app) settingsPage(c *ui.Context) {
 				fact(c, "数据", a.dataDir)
 				ui.Row(c).Gap(8).Children(func() {
 					ghostButton(c, "更改…", iconFolder, a.changeDataDir)
+					ghostButton(c, "打开目录", iconFolder, func() {
+						_ = mygo.Shell.OpenExternal("file://" + a.dataDir)
+					})
 					if a.dataDirCustom {
 						ghostButton(c, "恢复默认", nil, a.resetDataDir)
 					}

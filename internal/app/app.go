@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -92,6 +94,8 @@ type app struct {
 	// 0 untried, 1 remuxed, 2 transcoded.
 	retryStream streamproxy.Stream
 	retryStage  map[string]int
+	// errLogged is the item whose player error is already in the log.
+	errLogged string
 	// sourceMenu shows the list of sources, from the sidebar's foot.
 	sourceMenu bool
 
@@ -357,7 +361,10 @@ func (a *app) start() {
 	a.webdavDirs = map[string]webdavDir{}
 
 	a.proxy, _ = streamproxy.New()
+	streamproxy.Log = func(msg string) { a.diag("%s", msg) }
 	a.retryStage = map[string]int{}
+	a.diag("version=%s os=%s/%s", mygo.App.Version(), runtime.GOOS, runtime.GOARCH)
+	go a.logTools()
 	plugin.SetOpenURL(mygo.Shell.OpenExternal)
 	plugin.SetAppVersion(mygo.App.Version())
 	a.pluginsDir = filepath.Join(dir, "plugins")
@@ -801,8 +808,10 @@ func (a *app) extractSubs(it media.Item) {
 // turns the URL down, which Media Foundation does for some containers and
 // codecs, ffmpeg remuxes it into HLS and the player takes that.
 func (a *app) openStream(s streamproxy.Stream) (*ui.VideoPlayer, string, string, error) {
+	a.diag("open stream type=%s url=%s", s.Type, s.URL)
 	url, token, err := a.proxy.Open(s)
 	if err != nil {
+		a.diag("open stream failed: %v", err)
 		return nil, "", "", err
 	}
 	player, err := video.OpenURL(url)
@@ -1003,6 +1012,7 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	}
 	a.player = p
 	a.playing = it
+	a.errLogged = ""
 	a.current = it
 	a.playingQuality = ""
 	a.danmaku = nil
@@ -1132,6 +1142,28 @@ func (a *app) say(format string, args ...any) {
 }
 
 // diag writes a line to diag.log, for what a run should leave behind.
+// logTools writes what ffmpeg is and can do to the diagnostic log, so a file
+// that will not play can be explained from the log alone.
+func (a *app) logTools() {
+	if a.ffmpeg == "" {
+		return
+	}
+	if out, err := exec.Command(a.ffmpeg, "-hide_banner", "-version").Output(); err == nil {
+		line, _, _ := strings.Cut(string(out), "\n")
+		a.diag("ffmpeg: %s", strings.TrimSpace(line))
+	}
+	if out, err := exec.Command(a.ffmpeg, "-hide_banner", "-encoders").Output(); err == nil {
+		for _, name := range []string{"libx264", "h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"} {
+			if strings.Contains(string(out), name) {
+				a.diag("encoder: %s", name)
+			}
+		}
+	}
+	if out, err := exec.Command(a.ffmpeg, "-hide_banner", "-hwaccels").Output(); err == nil {
+		a.diag("hwaccels: %s", strings.Join(strings.Fields(string(out)), " "))
+	}
+}
+
 func (a *app) diag(format string, args ...any) {
 	if a.dataDir == "" {
 		return

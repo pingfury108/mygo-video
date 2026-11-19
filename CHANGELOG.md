@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.7
+
+- HLS segments are MPEG-TS: Media Foundation plays those, not the fMP4
+  ones the proxy wrote before, so a remuxed or transcoded file still failed
+  on Windows even after ffmpeg took over.
+- `diag.log` now says what happened: the version, what ffmpeg is and which
+  encoders it has, every stream opened, every retry, what ffmpeg prints,
+  and the player's error.
+
 ## 0.1.6
 
 - A file the system's player has no decoder for, such as HEVC on Windows
