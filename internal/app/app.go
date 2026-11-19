@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -1229,15 +1230,10 @@ func (a *app) pickVideoEncoder() string {
 	if a.ffmpeg == "" {
 		return ""
 	}
-	for _, enc := range []string{"h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"} {
-		// A yuv420p test picture: the GPU encoders turn down anything else,
-		// and nullsrc would hand them rgb24.
-		cmd := exec.Command(a.ffmpeg, "-hide_banner", "-loglevel", "error",
-			"-f", "lavfi", "-i", "testsrc=size=256x256:rate=1:duration=1",
-			"-pix_fmt", "yuv420p",
-			"-c:v", enc, "-f", "null", "-")
-		executil.Hide(cmd)
-		if err := cmd.Run(); err == nil {
+	// Media Foundation's encoder is left out: it is a software one on most
+	// machines, slower than x264.
+	for _, enc := range []string{"h264_nvenc", "h264_qsv", "h264_amf"} {
+		if a.encoderWorks(enc) {
 			a.videoEncoder = enc
 			a.diag("video encoder: %s", enc)
 			return enc
@@ -1246,6 +1242,26 @@ func (a *app) pickVideoEncoder() string {
 	a.videoEncoder = "libx264"
 	a.diag("video encoder: libx264")
 	return a.videoEncoder
+}
+
+// encoderWorks runs a one-second encode with the encoder. That ffmpeg was
+// built with it says nothing about the hardware being there or the driver
+// taking it, so it is asked to encode once, with the pixel format each
+// takes: Quick Sync wants nv12, the others yuv420p.
+func (a *app) encoderWorks(enc string) bool {
+	args := []string{"-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "testsrc2=size=256x256:rate=1:duration=1"}
+	if enc == "h264_qsv" {
+		args = append(args, "-pix_fmt", "nv12")
+	} else {
+		args = append(args, "-pix_fmt", "yuv420p")
+	}
+	args = append(args, "-c:v", enc, "-f", "null", "-")
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, a.ffmpeg, args...)
+	executil.Hide(cmd)
+	return cmd.Run() == nil
 }
 
 // hevcNeedsTranscode says the stream's video is HEVC, which Media Foundation

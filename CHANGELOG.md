@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.13
+
+- The GPU encoder check asks each one to encode a second of a test picture,
+  yuv420p or nv12 as it takes, within a timeout, and no longer settles for
+  Media Foundation's software encoder: the old check handed NVENC rgb24 and
+  gave up, so a machine with a GPU still transcoded on the CPU.
+- A version tag publishes a release; pushes to main no longer run the build.
+
 ## 0.1.12
 
 - The check for a GPU encoder failed on machines that have one: it handed

@@ -1,8 +1,8 @@
 name: build
 
 on:
+  # A version tag publishes a release; anything else is run by hand.
   push:
-    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
