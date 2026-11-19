@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.15
+
+- The GPU encoder check writes a file instead of stdout: a windowed app has
+  no console, and NVENC crashed (0xc0000005) on the pipe it got instead,
+  while the same command ran fine from a terminal.
+
 ## 0.1.14
 
 - Windows carries ffmpeg 7.1 rather than a master build: the master builds

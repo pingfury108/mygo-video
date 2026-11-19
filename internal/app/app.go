@@ -1249,21 +1249,30 @@ func (a *app) pickVideoEncoder() string {
 // taking it, so it is asked to encode once, with the pixel format each
 // takes: Quick Sync wants nv12, the others yuv420p.
 func (a *app) encoderWorks(enc string) bool {
-	args := []string{"-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "testsrc=size=256x256:rate=1:duration=1"}
+	out := filepath.Join(a.dataDir, "tmp", "encoder-"+enc+".mp4")
+	defer os.Remove(out)
+	args := []string{"-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc=size=256x256:rate=25:duration=1"}
 	if enc == "h264_qsv" {
 		args = append(args, "-pix_fmt", "nv12")
 	} else {
 		args = append(args, "-pix_fmt", "yuv420p")
 	}
-	args = append(args, "-c:v", enc, "-f", "null", "-")
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	// Written to a file rather than stdout: a windowed app has no console,
+	// and NVENC crashes on the pipe it would get instead.
+	args = append(args, "-c:v", enc, out)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, a.ffmpeg, args...)
 	executil.Hide(cmd)
-	out, err := cmd.CombinedOutput()
+	res, err := cmd.CombinedOutput()
 	if err != nil {
-		a.diag("encoder %s: %v (%s)", enc, err, strings.TrimSpace(string(out)))
+		a.diag("encoder %s: %v (%s)", enc, err, strings.TrimSpace(string(res)))
+		return false
+	}
+	st, err := os.Stat(out)
+	if err != nil || st.Size() == 0 {
+		a.diag("encoder %s: wrote nothing", enc)
 		return false
 	}
 	return true
