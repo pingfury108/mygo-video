@@ -102,6 +102,9 @@ jobs:
           if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi
           "$bin" -version | head -1
       - name: build
+        env:
+          # Signs the update manifests and archives the app reads.
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
         shell: bash
         run: go tool mygo build -platform ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
@@ -116,13 +119,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
           dir="build/${{ matrix.target }}"
           mkdir -p dist
-          case "${{ matrix.target }}" in
-            darwin-*) cp "$dir"/*.dmg dist/ ;;
-            windows-*) cp "$dir"/*setup*.exe dist/ ;;
-            *) cp "$dir"/*.deb "$dir"/*.rpm "$dir"/*.tar.gz dist/ ;;
-          esac
+          for f in "$dir"/*.dmg "$dir"/*setup*.exe "$dir"/*.deb "$dir"/*.rpm \
+                   "$dir"/*.tar.gz "$dir"/update-*.json "$dir"/*.delta; do
+            cp "$f" dist/
+          done
           ls -lh dist
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/')

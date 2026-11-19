@@ -31,6 +31,8 @@ var (
 	iconClock    = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>`)
 	iconMore     = strokeIcon(`<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>`)
 	iconClose    = strokeIcon(`<path d="M6 6l12 12M18 6L6 18"/>`)
+	iconMinimize = strokeIcon(`<path d="M5 12h14"/>`)
+	iconMaximize = strokeIcon(`<rect x="5" y="5" width="14" height="14" rx="1.5"/>`)
 	iconSubs     = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 13h4M13 13h4M7 16h3"/>`)
 	iconFull     = strokeIcon(`<path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/>`)
 	iconEpisodes = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M9 5v14"/>`)

@@ -3,8 +3,12 @@ export default ({ command }: { command: string }) => ({
   name: "MyGo Video",
   identifier: "dev.pingfury.video",
   slug: "mygo-video",
-  version: "0.1.1",
+  version: "0.1.2",
   out: "build",
+  updates: {
+    publicKey: "CQ2rZMu1lVUSqWc89oe9v+e7ddSZGdUdDDMgiw98p7A=",
+    github: "pingfury108/mygo-video",
+  },
   urlSchemes: [command === "dev" ? "mygo-video-dev" : "mygo-video"],
   macos: {
     minimumSystemVersion: "13.0",

@@ -68,8 +68,14 @@ func (a *app) settingsPage(c *ui.Context) {
 
 			settingsCard(c, "关于", func() {
 				fact(c, "版本", version())
-				fact(c, "框架", "MyGo v0.9.0")
+				fact(c, "框架", "MyGo v0.10.0")
 				fact(c, "数据", a.dataDir)
+				ui.Row(c).Gap(8).Children(func() {
+					ghostButton(c, "更改…", iconFolder, a.changeDataDir)
+					if a.dataDirCustom {
+						ghostButton(c, "恢复默认", nil, a.resetDataDir)
+					}
+				})
 				ui.Text(c, "仅播放你有权访问的内容。").
 					FontSize(11).TextColor(p.faint).PaddingY(4)
 			})

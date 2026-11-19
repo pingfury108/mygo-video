@@ -6,10 +6,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/video"
 
@@ -82,6 +84,8 @@ type app struct {
 	current media.Item
 	query   string
 	dataDir string
+	// dataDirCustom says the listener chose where the data lives.
+	dataDirCustom bool
 	// sourceMenu shows the list of sources, from the sidebar's foot.
 	sourceMenu bool
 
@@ -254,6 +258,9 @@ func Run() error {
 	if !mygo.App.RequestSingleInstanceLock() {
 		return nil
 	}
+	// The update window Sparkle made familiar, in native UI: it checks
+	// the GitHub releases of the app and installs a newer one.
+	mygo.Use(native.Plugin)
 	a := &app{danmakuOn: true}
 	// A second launch hands its command line over and exits; bring the
 	// window the first one holds back to the front, or the launch looks
@@ -273,6 +280,10 @@ func Run() error {
 }
 
 func (a *app) start() {
+	if dir := readDataDirPointer(); dir != "" {
+		mygo.App.SetPath(mygo.PathUserData, dir)
+		a.dataDirCustom = true
+	}
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
 		dir = filepath.Join(os.TempDir(), "mygo-video")
@@ -336,14 +347,17 @@ func (a *app) start() {
 	}
 
 	a.win = mygo.NewWindow(mygo.WindowOptions{
-		Title:                appName,
-		Width:                1180,
-		Height:               780,
-		MinWidth:             900,
-		MinHeight:            600,
-		StateKey:             "main",
-		TitleBarStyle:        mygo.TitleBarHidden,
-		TitleBarHeight:       38,
+		Title:          appName,
+		Width:          1180,
+		Height:         780,
+		MinWidth:       900,
+		MinHeight:      600,
+		StateKey:       "main",
+		TitleBarStyle:  mygo.TitleBarHidden,
+		TitleBarHeight: 38,
+		// Windows and Linux draw the buttons of a hidden title bar in a
+		// color the dark background hides, so the app draws its own.
+		HideWindowButtons:    runtime.GOOS != "darwin",
 		TrafficLightPosition: &mygo.Point{X: 20, Y: 18},
 		BackgroundColor:      "#0d0e11",
 		Content:              ui.View(a.view),
@@ -713,6 +727,11 @@ func (a *app) play(it media.Item, fromStart bool) {
 	a.closePlayer()
 	p, err := video.Open(it.Path)
 	if err != nil {
+		// Media Foundation, on Windows, turns down some containers and
+		// codecs; ffmpeg can remux most of them into HLS it takes.
+		if a.playRemuxed(it, fromStart) {
+			return
+		}
 		a.toast = "打不开这个视频：" + err.Error()
 		a.openDetail(it)
 		return
@@ -743,6 +762,37 @@ func (a *app) extractSubs(it media.Item) {
 			a.invalidate()
 		})
 	}()
+}
+
+// playRemuxed hands a file the system's player refuses to ffmpeg, which
+// remuxes it into HLS the player takes: Media Foundation turns down some
+// containers and audio codecs it would otherwise play.
+func (a *app) playRemuxed(it media.Item, fromStart bool) bool {
+	if a.ffmpeg == "" || a.proxy == nil {
+		return false
+	}
+	url, token, err := a.proxy.Open(streamproxy.Stream{
+		URL:    it.Path,
+		Type:   "remux",
+		FFmpeg: a.ffmpeg,
+	})
+	if err != nil {
+		return false
+	}
+	player, err := video.OpenURL(url)
+	if err != nil {
+		a.proxy.Forget(token)
+		return false
+	}
+	a.proxyToken = token
+	a.subs = subtitle.Load(it.Path)
+	a.subsOn = len(a.subs) > 0
+	if len(a.subs) == 0 {
+		a.extractSubs(it)
+	}
+	a.beginPlayback(it, player, fromStart)
+	a.diag("remuxed %s", it.Path)
+	return true
 }
 
 // playPlugin asks the plugin for a stream and plays it through the proxy,

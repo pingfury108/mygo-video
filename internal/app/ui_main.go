@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/egoist/mygo/ui"
 
@@ -25,17 +26,59 @@ func (a *app) view(c *ui.Context) {
 	}
 	bar := c.TitleBar()
 	p := colors()
-	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-		a.sidebar(c, bar)
-		ui.Column(c).Grow(1).Background(p.bg).Children(func() {
-			a.page(c)
+	ui.Box(c).Fill().Children(func() {
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+			a.sidebar(c, bar)
+			ui.Column(c).Grow(1).Background(p.bg).Children(func() {
+				a.page(c)
+			})
 		})
+		if runtime.GOOS != "darwin" {
+			a.windowButtons(c)
+		}
 	})
 	if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
 	}
 	a.installDialogView(c)
+}
+
+// windowButtons draws the minimize, maximize and close buttons of a window
+// whose title bar is hidden, where the system draws them in a color the
+// dark background hides.
+func (a *app) windowButtons(c *ui.Context) {
+	ui.Row(c).Absolute().Top(0).Right(0).Height(38).Children(func() {
+		a.windowButton(c, iconMinimize, false, func() { a.win.Minimize() })
+		a.windowButton(c, iconMaximize, false, func() {
+			if a.win.IsMaximized() {
+				a.win.Unmaximize()
+				return
+			}
+			a.win.Maximize()
+		})
+		a.windowButton(c, iconClose, true, func() { a.win.Close() })
+	})
+}
+
+// windowButton is one of those buttons, red for the one that closes.
+func (a *app) windowButton(c *ui.Context, icon *ui.SVG, danger bool, fn func()) {
+	b := ui.ButtonBase(c).Width(46).Height(38).FocusRing(false).Label("")
+	b.OnClick(fn)
+	if b.Hovered() {
+		if danger {
+			b.Background(ui.Hex("#c42b1c"))
+		} else {
+			b.Background(ui.RGBA(255, 255, 255, 0.09))
+		}
+	}
+	b.Children(func() {
+		col := ui.RGBA(255, 255, 255, 0.72)
+		if danger && b.Hovered() {
+			col = ui.Hex("#ffffff")
+		}
+		ui.Icon(c, icon).Size(11, 11).TextColor(col)
+	})
 }
 
 func (a *app) page(c *ui.Context) {
