@@ -790,6 +790,36 @@ func (a *app) extractSubs(it media.Item) {
 	}()
 }
 
+// openStream plays a stream through the proxy. When the system's player
+// turns the URL down, which Media Foundation does for some containers and
+// codecs, ffmpeg remuxes it into HLS and the player takes that.
+func (a *app) openStream(s streamproxy.Stream) (*ui.VideoPlayer, string, string, error) {
+	url, token, err := a.proxy.Open(s)
+	if err != nil {
+		return nil, "", "", err
+	}
+	player, err := video.OpenURL(url)
+	if err == nil {
+		return player, token, url, nil
+	}
+	a.proxy.Forget(token)
+	if s.FFmpeg == "" {
+		return nil, "", "", err
+	}
+	s.Type = "remux"
+	url, token, err = a.proxy.Open(s)
+	if err != nil {
+		return nil, "", "", err
+	}
+	player, err = video.OpenURL(url)
+	if err != nil {
+		a.proxy.Forget(token)
+		return nil, "", "", err
+	}
+	a.diag("remuxed %s", s.URL)
+	return player, token, url, nil
+}
+
 // playRemuxed hands a file the system's player refuses to ffmpeg, which
 // remuxes it into HLS the player takes: Media Foundation turns down some
 // containers and audio codecs it would otherwise play.
@@ -875,7 +905,7 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 		a.say("这个流需要 ffmpeg：设置 → 工具")
 		return
 	}
-	url, token, err := a.proxy.Open(streamproxy.Stream{
+	player, token, _, err := a.openStream(streamproxy.Stream{
 		URL:     videoURL,
 		Type:    kind,
 		Audio:   audio,
@@ -883,12 +913,6 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 		FFmpeg:  a.ffmpeg,
 	})
 	if err != nil {
-		a.say("%v", err)
-		return
-	}
-	player, err := video.OpenURL(url)
-	if err != nil {
-		a.proxy.Forget(token)
 		a.say("%v", err)
 		return
 	}

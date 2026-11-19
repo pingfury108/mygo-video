@@ -15,7 +15,6 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/video"
 
 	"mygo-video/internal/executil"
 	"mygo-video/internal/local"
@@ -182,7 +181,7 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	if strings.HasSuffix(strings.ToLower(it.RemoteID), ".m3u8") {
 		kind = "hls"
 	}
-	url, token, err := a.proxy.Open(streamproxy.Stream{
+	player, token, url, err := a.openStream(streamproxy.Stream{
 		URL:     it.RemoteID,
 		Type:    kind,
 		Headers: a.webdavAuth(),
@@ -195,12 +194,6 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	}
 	a.webdavHLS = strings.Contains(url, "/hls/")
 	a.webdavBase = d
-	player, err := video.OpenURL(url)
-	if err != nil {
-		a.proxy.Forget(token)
-		a.say("%v", err)
-		return
-	}
 	a.proxyToken = token
 	a.subs = nil
 	a.subsOn = false

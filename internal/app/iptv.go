@@ -6,7 +6,6 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/video"
 
 	"mygo-video/internal/iptv"
 	"mygo-video/internal/media"
@@ -211,18 +210,12 @@ func (a *app) playIPTV(ch iptv.Channel) {
 	case strings.HasSuffix(low, ".mp4"), strings.HasSuffix(low, ".m4v"), strings.HasSuffix(low, ".mkv"):
 		kind = "mp4"
 	}
-	url, token, err := a.proxy.Open(streamproxy.Stream{
+	player, token, _, err := a.openStream(streamproxy.Stream{
 		URL:    ch.URL,
 		Type:   kind,
 		FFmpeg: a.ffmpeg,
 	})
 	if err != nil {
-		a.say("%v", err)
-		return
-	}
-	player, err := video.OpenURL(url)
-	if err != nil {
-		a.proxy.Forget(token)
 		a.say("%v", err)
 		return
 	}

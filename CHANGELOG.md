@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4
+
+- WebDAV, IPTV and plugin streams get the same remux fallback as local
+  files: when Media Foundation turns a stream down, ffmpeg remuxes it into
+  HLS instead of showing the error.
+
 ## 0.1.3
 
 - A "Check for Updates…" item in the app menu, and on Windows and Linux in
