@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.11
+
+- A transcode keeps the picture's size and encodes with the GPU's encoder
+  (NVENC, Quick Sync or AMF) where one works, which keeps a 4K picture ahead
+  of playback; x264 is the fallback.
+
 ## 0.1.10
 
 - A transcoded stream decodes on the GPU where there is one, is scaled to

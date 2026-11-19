@@ -57,6 +57,9 @@ type Stream struct {
 	// Audio is where the sound of a stream kept apart comes from, as DASH
 	// does; the remux joins it to the picture.
 	Audio string
+	// VideoEncoder is what a transcode encodes the picture with, such as
+	// h264_nvenc; empty uses libx264.
+	VideoEncoder string
 
 	// hls is the remux running for this stream, if any.
 	hls *hlsJob
@@ -443,11 +446,8 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		hlsTime = "2"
 	}
 	if transcode {
-		args = append(args,
-			"-vf", "scale=-2:min(ih\\,1080)",
-			"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-			"-c:a", "aac", "-b:a", "128k",
-		)
+		args = append(args, encoderArgs(s.VideoEncoder)...)
+		args = append(args, "-c:a", "aac", "-b:a", "128k")
 	} else {
 		args = append(args, "-c", "copy")
 	}
@@ -529,6 +529,22 @@ func (p *Proxy) serveHLS(w http.ResponseWriter, r *http.Request, s *Stream, name
 		w.Header().Set("Content-Type", "video/mp4")
 	}
 	http.ServeFile(w, r, path)
+}
+
+// encoderArgs is how a transcode encodes its picture: the GPU's encoder where
+// there is one, which keeps up with a 4K picture, else x264.
+func encoderArgs(enc string) []string {
+	switch enc {
+	case "h264_nvenc":
+		return []string{"-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0"}
+	case "h264_qsv":
+		return []string{"-c:v", "h264_qsv", "-preset", "veryfast", "-global_quality", "23"}
+	case "h264_amf":
+		return []string{"-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_i", "23", "-qp_p", "23"}
+	case "h264_mf":
+		return []string{"-c:v", "h264_mf", "-b:v", "12M"}
+	}
+	return []string{"-c:v", "libx264", "-preset", "veryfast", "-crf", "23"}
 }
 
 func headerLines(h map[string]string) string {

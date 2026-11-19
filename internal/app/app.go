@@ -98,6 +98,8 @@ type app struct {
 	// hevcExt is whether Microsoft's HEVC decoder is installed, checked once.
 	hevcExt        bool
 	hevcExtChecked bool
+	// videoEncoder is the encoder a transcode uses, picked once.
+	videoEncoder string
 	// errLogged is the item whose player error is already in the log.
 	errLogged string
 	// sourceMenu shows the list of sources, from the sidebar's foot.
@@ -824,6 +826,9 @@ func (a *app) openStream(s streamproxy.Stream) (*ui.VideoPlayer, string, string,
 		s.Type = "transcode"
 		a.diag("hevc: transcoding %s", s.URL)
 	}
+	if s.Type == "transcode" && s.VideoEncoder == "" {
+		s.VideoEncoder = a.pickVideoEncoder()
+	}
 	a.diag("open stream type=%s url=%s", s.Type, s.URL)
 	url, token, err := a.proxy.Open(s)
 	if err != nil {
@@ -864,10 +869,15 @@ func (a *app) playRemuxed(it media.Item, fromStart bool) bool {
 		kind = "transcode"
 		a.diag("hevc: transcoding %s", it.Path)
 	}
+	encoder := ""
+	if kind == "transcode" {
+		encoder = a.pickVideoEncoder()
+	}
 	url, token, err := a.proxy.Open(streamproxy.Stream{
-		URL:    it.Path,
-		Type:   kind,
-		FFmpeg: a.ffmpeg,
+		URL:          it.Path,
+		Type:         kind,
+		VideoEncoder: encoder,
+		FFmpeg:       a.ffmpeg,
 	})
 	if err != nil {
 		return false
@@ -999,6 +1009,7 @@ func (a *app) retryPlayback() {
 	s := a.retryStream
 	if a.retryStage[a.playing.ID] >= 2 {
 		s.Type = "transcode"
+		s.VideoEncoder = a.pickVideoEncoder()
 	} else {
 		s.Type = "remux"
 	}
@@ -1207,6 +1218,31 @@ func (a *app) hevcExtensionInstalled() bool {
 		a.diag("hevc extension found: %s", dirs[0])
 	}
 	return a.hevcExt
+}
+
+// pickVideoEncoder is the encoder a transcode uses: the GPU's where one
+// works, which keeps a 4K picture ahead of playback, else x264.
+func (a *app) pickVideoEncoder() string {
+	if a.videoEncoder != "" {
+		return a.videoEncoder
+	}
+	if a.ffmpeg == "" {
+		return ""
+	}
+	for _, enc := range []string{"h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"} {
+		cmd := exec.Command(a.ffmpeg, "-hide_banner", "-loglevel", "error",
+			"-f", "lavfi", "-i", "nullsrc=s=256x256:d=0.1",
+			"-c:v", enc, "-f", "null", "-")
+		executil.Hide(cmd)
+		if err := cmd.Run(); err == nil {
+			a.videoEncoder = enc
+			a.diag("video encoder: %s", enc)
+			return enc
+		}
+	}
+	a.videoEncoder = "libx264"
+	a.diag("video encoder: libx264")
+	return a.videoEncoder
 }
 
 // hevcNeedsTranscode says the stream's video is HEVC, which Media Foundation
