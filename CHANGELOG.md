@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.14
+
+- Windows carries ffmpeg 7.1 rather than a master build: the master builds
+  want NVENC API 13.1 and a 610 driver, so a machine on an older driver fell
+  back to x264. 7.1 asks for 12.1, which drivers from 550 take.
+
 ## 0.1.13
 
 - The GPU encoder check asks each one to encode a second of a test picture,

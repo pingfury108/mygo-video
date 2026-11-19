@@ -41,7 +41,9 @@ jobs:
               chmod +x out/ffmpeg
               ;;
             windows-amd64)
-              curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/f.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
+              # 7.1, from gyan.dev: the master builds want NVENC API 13.1 and a
+              # 610 driver, which most machines here do not have yet.
+              curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/f.zip https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip
               unzip -j /tmp/f.zip "*/bin/ffmpeg.exe" -d out
               ;;
             linux-amd64)

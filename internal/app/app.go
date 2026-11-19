@@ -1250,7 +1250,7 @@ func (a *app) pickVideoEncoder() string {
 // takes: Quick Sync wants nv12, the others yuv420p.
 func (a *app) encoderWorks(enc string) bool {
 	args := []string{"-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "testsrc2=size=256x256:rate=1:duration=1"}
+		"-f", "lavfi", "-i", "testsrc=size=256x256:rate=1:duration=1"}
 	if enc == "h264_qsv" {
 		args = append(args, "-pix_fmt", "nv12")
 	} else {
@@ -1261,7 +1261,12 @@ func (a *app) encoderWorks(enc string) bool {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, a.ffmpeg, args...)
 	executil.Hide(cmd)
-	return cmd.Run() == nil
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		a.diag("encoder %s: %v (%s)", enc, err, strings.TrimSpace(string(out)))
+		return false
+	}
+	return true
 }
 
 // hevcNeedsTranscode says the stream's video is HEVC, which Media Foundation
