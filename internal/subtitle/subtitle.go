@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mygo-video/internal/executil"
 )
 
 // Cue is one line of subtitles, or a few, and when it shows.
@@ -195,6 +197,7 @@ func Extract(video, ffmpeg string) []Cue {
 	cmd := exec.CommandContext(ctx, ffmpeg,
 		"-v", "error", "-i", video,
 		"-map", "0:s:0", "-f", "srt", "pipe:1")
+	executil.Hide(cmd)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {

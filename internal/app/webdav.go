@@ -17,6 +17,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/video"
 
+	"mygo-video/internal/executil"
 	"mygo-video/internal/local"
 	"mygo-video/internal/media"
 	"mygo-video/internal/store"
@@ -220,7 +221,9 @@ func (a *app) probeWebDAVDuration(it media.Item) {
 	}
 	args = append(args, "-i", it.RemoteID)
 	go func() {
-		out, _ := exec.Command(ff, args...).CombinedOutput()
+		cmd := exec.Command(ff, args...)
+		executil.Hide(cmd)
+		out, _ := cmd.CombinedOutput()
 		sec, ok := ffmpegDuration(string(out))
 		if !ok || sec <= 0 {
 			return

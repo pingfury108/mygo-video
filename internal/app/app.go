@@ -237,12 +237,36 @@ type app struct {
 	toast string
 }
 
+// ReportFatal keeps what stopped the app from running in the data directory:
+// a windowed program on Windows has no terminal to print it to.
+func ReportFatal(err error) {
+	dir, derr := mygo.App.Path(mygo.PathUserData)
+	if derr != nil {
+		dir = os.TempDir()
+	}
+	line := fmt.Sprintf("%s  %v\n", time.Now().Format("2006-01-02 15:04:05"), err)
+	_ = os.WriteFile(filepath.Join(dir, "startup-error.log"), []byte(line), 0o600)
+	os.Exit(1)
+}
+
 // Run runs the app until the user quits.
 func Run() error {
 	if !mygo.App.RequestSingleInstanceLock() {
 		return nil
 	}
 	a := &app{danmakuOn: true}
+	// A second launch hands its command line over and exits; bring the
+	// window the first one holds back to the front, or the launch looks
+	// like nothing happened.
+	mygo.App.OnSecondInstance(func(args []string, wd string) {
+		mygo.RunOnMain(func() {
+			if a.win == nil {
+				return
+			}
+			a.win.Show()
+			a.win.Focus()
+		})
+	})
 	mygo.App.WhenReady(a.start)
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.shutdown() })
 	return mygo.App.Run()

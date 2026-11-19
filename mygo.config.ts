@@ -3,7 +3,7 @@ export default ({ command }: { command: string }) => ({
   name: "MyGo Video",
   identifier: "dev.pingfury.video",
   slug: "mygo-video",
-  version: "0.1.0",
+  version: "0.1.1",
   out: "build",
   urlSchemes: [command === "dev" ? "mygo-video-dev" : "mygo-video"],
   macos: {

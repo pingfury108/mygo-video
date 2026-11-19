@@ -32,6 +32,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mygo-video/internal/executil"
 )
 
 // Stream is what a source hands over to play.
@@ -434,6 +436,7 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &hlsJob{dir: dir, cancel: cancel}
 	cmd := exec.CommandContext(ctx, s.FFmpeg, args...)
+	executil.Hide(cmd)
 	job.cmd = cmd
 	cmd.Stderr = &job.stderr
 	if err := cmd.Start(); err != nil {

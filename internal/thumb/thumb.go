@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"mygo-video/internal/executil"
 )
 
 // Width is how wide a thumbnail is: enough for a card, a poster crop and a
@@ -64,6 +66,7 @@ func run(ctx context.Context, ffmpeg, at, video, path string) error {
 		"-q:v", "4",
 		path,
 	)
+	executil.Hide(cmd)
 	if err := cmd.Run(); err != nil {
 		_ = os.Remove(path)
 		return err
@@ -117,6 +120,7 @@ func runURL(ctx context.Context, ffmpeg, at, raw string, headers map[string]stri
 		path,
 	)
 	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	executil.Hide(cmd)
 	if err := cmd.Run(); err != nil {
 		_ = os.Remove(path)
 		return err
