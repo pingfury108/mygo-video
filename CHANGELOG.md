@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.9
+
+- The three ffmpeg probes at launch no longer flash console windows on
+  Windows.
+- A stream whose video is HEVC is transcoded before it plays on Windows:
+  Media Foundation would play its audio and leave the picture black, with no
+  error to notice, so the app asks ffmpeg first.
+
 ## 0.1.8
 
 - HLS parts are served as `video/mp2t`: Media Foundation turns down a TS

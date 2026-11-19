@@ -18,6 +18,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/video"
 
+	"mygo-video/internal/executil"
 	"mygo-video/internal/ffbin"
 	"mygo-video/internal/iptv"
 	"mygo-video/internal/local"
@@ -816,6 +817,10 @@ func (a *app) extractSubs(it media.Item) {
 // turns the URL down, which Media Foundation does for some containers and
 // codecs, ffmpeg remuxes it into HLS and the player takes that.
 func (a *app) openStream(s streamproxy.Stream) (*ui.VideoPlayer, string, string, error) {
+	if a.hevcNeedsTranscode(s) {
+		s.Type = "transcode"
+		a.diag("hevc: transcoding %s", s.URL)
+	}
 	a.diag("open stream type=%s url=%s", s.Type, s.URL)
 	url, token, err := a.proxy.Open(s)
 	if err != nil {
@@ -851,9 +856,14 @@ func (a *app) playRemuxed(it media.Item, fromStart bool) bool {
 	if a.ffmpeg == "" || a.proxy == nil {
 		return false
 	}
+	kind := "remux"
+	if a.hevcNeedsTranscode(streamproxy.Stream{URL: it.Path}) {
+		kind = "transcode"
+		a.diag("hevc: transcoding %s", it.Path)
+	}
 	url, token, err := a.proxy.Open(streamproxy.Stream{
 		URL:    it.Path,
-		Type:   "remux",
+		Type:   kind,
 		FFmpeg: a.ffmpeg,
 	})
 	if err != nil {
@@ -1156,20 +1166,49 @@ func (a *app) logTools() {
 	if a.ffmpeg == "" {
 		return
 	}
-	if out, err := exec.Command(a.ffmpeg, "-hide_banner", "-version").Output(); err == nil {
+	run := func(args ...string) []byte {
+		cmd := exec.Command(a.ffmpeg, append([]string{"-hide_banner"}, args...)...)
+		executil.Hide(cmd)
+		out, _ := cmd.Output()
+		return out
+	}
+	if out := run("-version"); len(out) > 0 {
 		line, _, _ := strings.Cut(string(out), "\n")
 		a.diag("ffmpeg: %s", strings.TrimSpace(line))
 	}
-	if out, err := exec.Command(a.ffmpeg, "-hide_banner", "-encoders").Output(); err == nil {
+	if out := run("-encoders"); len(out) > 0 {
 		for _, name := range []string{"libx264", "h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"} {
 			if strings.Contains(string(out), name) {
 				a.diag("encoder: %s", name)
 			}
 		}
 	}
-	if out, err := exec.Command(a.ffmpeg, "-hide_banner", "-hwaccels").Output(); err == nil {
+	if out := run("-hwaccels"); len(out) > 0 {
 		a.diag("hwaccels: %s", strings.Join(strings.Fields(string(out)), " "))
 	}
+}
+
+// hevcNeedsTranscode says the stream's video is HEVC, which Media Foundation
+// cannot decode without Microsoft's extension: its audio would play and its
+// picture stay black, without an error to notice.
+func (a *app) hevcNeedsTranscode(s streamproxy.Stream) bool {
+	if a.ffmpeg == "" || runtime.GOOS != "windows" {
+		return false
+	}
+	// Only a file handed over as it is can be HEVC the player cannot take;
+	// HLS, DASH and FLV already go through ffmpeg.
+	if s.Type != "" && s.Type != "mp4" && s.Type != "remux" {
+		return false
+	}
+	args := []string{"-hide_banner"}
+	if h := headerArg(s.Headers); h != "" {
+		args = append(args, "-headers", h)
+	}
+	args = append(args, "-i", s.URL)
+	cmd := exec.Command(a.ffmpeg, args...)
+	executil.Hide(cmd)
+	out, _ := cmd.CombinedOutput()
+	return strings.Contains(string(out), "Video: hevc")
 }
 
 func (a *app) diag(format string, args ...any) {
