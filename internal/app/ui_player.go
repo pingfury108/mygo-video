@@ -78,10 +78,14 @@ func (a *app) playerPage(c *ui.Context) {
 		a.episodeDrawer(c)
 		if err := pl.Err(); err != nil {
 			if a.canRetry() {
+				msg := "正在换一种方式打开…"
+				if a.retryStage[a.playing.ID] >= 2 {
+					msg = "正在转码，可能较慢…"
+				}
 				time.AfterFunc(80*time.Millisecond, func() {
 					mygo.RunOnMain(a.retryPlayback)
 				})
-				a.playerMessage(c, "正在换一种方式打开…", "", false)
+				a.playerMessage(c, msg, "", false)
 			} else {
 				a.playerMessage(c, "打不开这个视频", err.Error(), true)
 			}

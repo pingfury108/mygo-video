@@ -139,7 +139,7 @@ func (p *Proxy) Open(s Stream) (string, string, error) {
 	// An MP4 with its moov at the end can't be streamed by the system's
 	// player over HTTP: it waits for the whole file. Remux it to HLS as it
 	// comes, which the player begins on at once.
-	if s.Audio != "" || s.Type == "dash" || s.Type == "flv" || s.Type == "remux" {
+	if s.Audio != "" || s.Type == "dash" || s.Type == "flv" || s.Type == "remux" || s.Type == "transcode" {
 		if s.FFmpeg == "" {
 			return "", "", errors.New("streamproxy: this stream needs ffmpeg")
 		}
@@ -407,6 +407,12 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	if live {
 		args = append(args, "-fflags", "nobuffer", "-analyzeduration", "0", "-probesize", "524288")
 	}
+	// A file the system's player has no decoder for is transcoded: decode
+	// on the GPU where there is one, encode with x264.
+	transcode := s.Type == "transcode"
+	if transcode {
+		args = append(args, "-hwaccel", "auto")
+	}
 	addInput := func(u string) {
 		if h := headerLines(s.Headers); h != "" {
 			args = append(args, "-headers", h)
@@ -422,8 +428,15 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	if live {
 		hlsTime = "2"
 	}
+	if transcode {
+		args = append(args,
+			"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+			"-c:a", "aac", "-b:a", "128k",
+		)
+	} else {
+		args = append(args, "-c", "copy")
+	}
 	args = append(args,
-		"-c", "copy",
 		"-f", "hls",
 		"-hls_time", hlsTime,
 		"-hls_playlist_type", "event",

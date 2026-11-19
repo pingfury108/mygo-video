@@ -325,7 +325,7 @@ open designs/mygo-video/index.html
 
 ## License
 
-代码是 MIT，见 [LICENSE](LICENSE)。发行包里内嵌的 ffmpeg 是独立的程序（macOS 为 GPL 构建，Windows/Linux 为 LGPL 构建），它的许可与来源见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+代码是 MIT，见 [LICENSE](LICENSE)。发行包里内嵌的 ffmpeg 是独立的程序（各平台都是 GPL 构建，含 x264 转码器），它的许可与来源见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 ## 下一步
 

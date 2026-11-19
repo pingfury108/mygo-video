@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.6
+
+- A file the system's player has no decoder for, such as HEVC on Windows
+  without Microsoft's extension, is transcoded to H.264 instead of failing:
+  the GPU decodes it where there is one, x264 encodes it.
+- The bundled ffmpeg is the GPL build, which carries x264 for that.
+
 ## 0.1.5
 
 - A stream the system's player refuses is retried through ffmpeg as soon

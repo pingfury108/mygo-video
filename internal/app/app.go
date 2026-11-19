@@ -88,9 +88,10 @@ type app struct {
 	// dataDirCustom says the listener chose where the data lives.
 	dataDirCustom bool
 	// retry is the stream to open again through ffmpeg when the player
-	// turns the first one down, and retryTried the items already retried.
+	// turns the first one down, and retryStage how far that went for an item:
+	// 0 untried, 1 remuxed, 2 transcoded.
 	retryStream streamproxy.Stream
-	retryTried  map[string]bool
+	retryStage  map[string]int
 	// sourceMenu shows the list of sources, from the sidebar's foot.
 	sourceMenu bool
 
@@ -356,7 +357,7 @@ func (a *app) start() {
 	a.webdavDirs = map[string]webdavDir{}
 
 	a.proxy, _ = streamproxy.New()
-	a.retryTried = map[string]bool{}
+	a.retryStage = map[string]int{}
 	plugin.SetOpenURL(mygo.Shell.OpenExternal)
 	plugin.SetAppVersion(mygo.App.Version())
 	a.pluginsDir = filepath.Join(dir, "plugins")
@@ -949,23 +950,28 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 	}()
 }
 
-// canRetry says the player refused what it got and ffmpeg has not been tried
-// for this item yet.
+// canRetry says the player refused what it got, and ffmpeg can still try a
+// remux, then a transcode.
 func (a *app) canRetry() bool {
 	if a.ffmpeg == "" || a.player == nil || a.playing.ID == "" {
 		return false
 	}
-	if a.retryStream.URL == "" || a.retryTried[a.playing.ID] {
+	if a.retryStream.URL == "" || a.retryStage[a.playing.ID] >= 2 {
 		return false
 	}
-	a.retryTried[a.playing.ID] = true
+	a.retryStage[a.playing.ID]++
 	return true
 }
 
-// retryPlayback remuxes the stream into HLS and plays that instead.
+// retryPlayback plays the stream again through ffmpeg: remuxed first, then
+// transcoded to H.264, for a file the system's player has no decoder for.
 func (a *app) retryPlayback() {
 	s := a.retryStream
-	s.Type = "remux"
+	if a.retryStage[a.playing.ID] >= 2 {
+		s.Type = "transcode"
+	} else {
+		s.Type = "remux"
+	}
 	s.FFmpeg = a.ffmpeg
 	it := a.playing
 	url, token, err := a.proxy.Open(s)
@@ -983,7 +989,7 @@ func (a *app) retryPlayback() {
 	a.retryStream = s
 	a.proxyToken = token
 	a.beginPlayback(it, player, false)
-	a.diag("retried with remux: %s", s.URL)
+	a.diag("retried with %s: %s", s.Type, s.URL)
 }
 
 // beginPlayback makes p the video showing, from where the listener stopped

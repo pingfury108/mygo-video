@@ -11,7 +11,7 @@ The release builds bundle a static ffmpeg:
 | Platform | Source | License |
 | --- | --- | --- |
 | macOS arm64 / amd64 | [eugeneware/ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) (static builds from evermeet.cx) | GPL |
-| Windows x64 / Linux x64 | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (LGPL builds) | LGPL |
+| Windows x64 / Linux x64 | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (GPL builds) | GPL |
 
 ffmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
 See <https://ffmpeg.org/legal.html> for the licenses and what they require.
