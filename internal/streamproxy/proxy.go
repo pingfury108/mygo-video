@@ -422,6 +422,11 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	}
 	// A file the system's player has no decoder for is transcoded.
 	transcode := s.Type == "transcode"
+	if transcode {
+		// The GPU decodes what the player cannot, which is far faster than
+		// the CPU.
+		args = append(args, "-hwaccel", "auto")
+	}
 	addInput := func(u string) {
 		if h := headerLines(s.Headers); h != "" {
 			args = append(args, "-headers", h)
@@ -434,11 +439,12 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		args = append(args, "-map", "0:v:0", "-map", "1:a:0")
 	}
 	hlsTime := "4"
-	if live {
+	if live || transcode {
 		hlsTime = "2"
 	}
 	if transcode {
 		args = append(args,
+			"-vf", "scale=-2:min(ih\\,1080)",
 			"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
 			"-c:a", "aac", "-b:a", "128k",
 		)

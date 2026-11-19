@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.10
+
+- A transcoded stream decodes on the GPU where there is one, is scaled to
+  1080p at most and uses 2-second parts: a 4K H.264 encode at full size does
+  not keep up with playback, which made it stall every few seconds.
+- When Microsoft's HEVC decoder is installed, HEVC plays as it is instead of
+  being transcoded.
+
 ## 0.1.9
 
 - The three ffmpeg probes at launch no longer flash console windows on

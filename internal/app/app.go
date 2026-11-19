@@ -95,6 +95,9 @@ type app struct {
 	// 0 untried, 1 remuxed, 2 transcoded.
 	retryStream streamproxy.Stream
 	retryStage  map[string]int
+	// hevcExt is whether Microsoft's HEVC decoder is installed, checked once.
+	hevcExt        bool
+	hevcExtChecked bool
 	// errLogged is the item whose player error is already in the log.
 	errLogged string
 	// sourceMenu shows the list of sources, from the sidebar's foot.
@@ -1188,11 +1191,29 @@ func (a *app) logTools() {
 	}
 }
 
+// hevcExtensionInstalled says Microsoft's HEVC decoder is on the machine, in
+// which case the player takes HEVC as it is and nothing is transcoded.
+func (a *app) hevcExtensionInstalled() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	if a.hevcExtChecked {
+		return a.hevcExt
+	}
+	a.hevcExtChecked = true
+	dirs, _ := filepath.Glob(filepath.Join(os.Getenv("LOCALAPPDATA"), "Packages", "Microsoft.HEVCVideoExtension*"))
+	a.hevcExt = len(dirs) > 0
+	if a.hevcExt {
+		a.diag("hevc extension found: %s", dirs[0])
+	}
+	return a.hevcExt
+}
+
 // hevcNeedsTranscode says the stream's video is HEVC, which Media Foundation
 // cannot decode without Microsoft's extension: its audio would play and its
 // picture stay black, without an error to notice.
 func (a *app) hevcNeedsTranscode(s streamproxy.Stream) bool {
-	if a.ffmpeg == "" || runtime.GOOS != "windows" {
+	if a.ffmpeg == "" || runtime.GOOS != "windows" || a.hevcExtensionInstalled() {
 		return false
 	}
 	// Only a file handed over as it is can be HEVC the player cannot take;
