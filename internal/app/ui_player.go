@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"mygo-video/internal/media"
@@ -76,7 +77,14 @@ func (a *app) playerPage(c *ui.Context) {
 		a.playerControls(c)
 		a.episodeDrawer(c)
 		if err := pl.Err(); err != nil {
-			a.playerMessage(c, "打不开这个视频", err.Error(), true)
+			if a.canRetry() {
+				time.AfterFunc(80*time.Millisecond, func() {
+					mygo.RunOnMain(a.retryPlayback)
+				})
+				a.playerMessage(c, "正在换一种方式打开…", "", false)
+			} else {
+				a.playerMessage(c, "打不开这个视频", err.Error(), true)
+			}
 		} else if !pl.Ready() {
 			a.playerMessage(c, "正在打开…", "", false)
 			c.After(120 * time.Millisecond)

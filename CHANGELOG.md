@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- A stream the system's player refuses is retried through ffmpeg as soon
+  as the player reports the error, not only when opening the URL fails:
+  Media Foundation reports its refusals after the URL has opened.
+
 ## 0.1.4
 
 - WebDAV, IPTV and plugin streams get the same remux fallback as local

@@ -222,6 +222,7 @@ func (a *app) playIPTV(ch iptv.Channel) {
 	a.proxyToken = token
 	a.subs = nil
 	a.subsOn = false
+	a.retryStream = streamproxy.Stream{URL: ch.URL}
 	a.beginPlayback(media.Item{
 		ID:       "iptv:" + ch.URL,
 		Name:     ch.Name,

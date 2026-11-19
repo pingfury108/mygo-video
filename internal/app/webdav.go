@@ -197,6 +197,7 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	a.proxyToken = token
 	a.subs = nil
 	a.subsOn = false
+	a.retryStream = streamproxy.Stream{URL: it.RemoteID, Headers: a.webdavAuth(), Start: d}
 	a.beginPlayback(it, player, true)
 	a.probeWebDAVDuration(it)
 }
