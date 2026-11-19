@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12
+
+- The check for a GPU encoder failed on machines that have one: it handed
+  NVENC a picture in rgb24, which it turns down. A yuv420p test picture
+  finds NVENC, Quick Sync and AMF, so a 4K transcode runs on the GPU.
+
 ## 0.1.11
 
 - A transcode keeps the picture's size and encodes with the GPU's encoder

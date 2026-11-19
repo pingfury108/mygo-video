@@ -1230,8 +1230,11 @@ func (a *app) pickVideoEncoder() string {
 		return ""
 	}
 	for _, enc := range []string{"h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"} {
+		// A yuv420p test picture: the GPU encoders turn down anything else,
+		// and nullsrc would hand them rgb24.
 		cmd := exec.Command(a.ffmpeg, "-hide_banner", "-loglevel", "error",
-			"-f", "lavfi", "-i", "nullsrc=s=256x256:d=0.1",
+			"-f", "lavfi", "-i", "testsrc=size=256x256:rate=1:duration=1",
+			"-pix_fmt", "yuv420p",
 			"-c:v", enc, "-f", "null", "-")
 		executil.Hide(cmd)
 		if err := cmd.Run(); err == nil {
