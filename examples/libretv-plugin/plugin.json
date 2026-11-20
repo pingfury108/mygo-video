@@ -20,6 +20,7 @@
   ],
   "permissions": {
     "network": [
+      "tv.pingfury.top",
       "movie.douban.com",
       "*.doubanio.com",
       "caiji.dyttzyapi.com",

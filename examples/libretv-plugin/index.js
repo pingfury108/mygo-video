@@ -1,25 +1,67 @@
-// LibreTV：聚合搜索十三个苹果 CMS 采集站，取 m3u8 直连播放。详情一次请求
-// 给出全部集数，播放不再回源。个别源的 m3u8 有防盗链（如极速），那种搜出
-// 来换别的源就是。
+// LibreTV：聚合搜索采集站，取 m3u8 直连播放。源清单从部署的 tv 站运行时
+// 拉取——换源改那边即可，无需重发插件；拉不到时退回内置清单。详情一次
+// 请求给出全部集数，播放不再回源。个别源的 m3u8 有防盗链，那种搜出来
+// 换别的源就是。
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
 
-// 以实测为准（2026-11）：死站、Cloudflare 挑战、关搜索的都剔了。
-const SOURCES = [
-  { key: "dyttzy", name: "电影天堂", api: "http://caiji.dyttzyapi.com/api.php/provide/vod" },
+// 内置兑底：tv 站的源清单拉不到时用。
+const BUILT_IN = [
   { key: "ruyi", name: "如意", api: "https://cj.rycjapi.com/api.php/provide/vod" },
   { key: "bfzy", name: "暴风", api: "https://bfzyapi.com/api.php/provide/vod" },
-  { key: "ffzy", name: "非凡", api: "http://ffzy5.tv/api.php/provide/vod" },
   { key: "zy360", name: "360", api: "https://360zy.com/api.php/provide/vod" },
-  { key: "iqiyi", name: "iqiyi", api: "https://www.iqiyizyapi.com/api.php/provide/vod" },
   { key: "jisu", name: "极速", api: "https://jszyapi.com/api.php/provide/vod" },
-  { key: "dbzy", name: "豆瓣", api: "https://dbzy.tv/api.php/provide/vod" },
-  { key: "mdzy", name: "魔都", api: "https://www.mdzyapi.com/api.php/provide/vod" },
-  { key: "zuid", name: "最大", api: "https://api.zuidapi.com/api.php/provide/vod" },
-  { key: "yinghua", name: "樱花", api: "https://m3u8.apiyhzy.com/api.php/provide/vod" },
-  { key: "ikun", name: "iKun", api: "https://ikunzyapi.com/api.php/provide/vod" },
   { key: "lzi", name: "量子", api: "https://cj.lziapi.com/api.php/provide/vod" },
 ];
+
+// 源清单的远端地址与缓存：tv 站托管着与网页同一份清单文件，改源只改那边。
+const LIST_URL = "https://tv.pingfury.top/js/customer_site.js";
+const LIST_KEY = "sites";
+const LIST_TTL = 12 * 60 * 60 * 1000;
+
+let sources = null;
+let sourcesAt = 0;
+
+// parseSites reads the entries of a customer_site.js, whose shape this
+// deployment keeps stable: key: { api: '…', name: '…', … }.
+function parseSites(js) {
+  const out = [];
+  const re = /(\w+)\s*:\s*\{[^{}]*?api:\s*['"]([^'"]+)['"][^{}]*?name:\s*['"]([^'"]+)['"][^{}]*?\}/g;
+  let m;
+  while ((m = re.exec(String(js))) !== null) {
+    out.push({ key: m[1], name: m[3], api: m[2] });
+  }
+  return out;
+}
+
+async function loadSources() {
+  if (sources && Date.now() - sourcesAt < LIST_TTL) return sources;
+  try {
+    const cached = JSON.parse(host.storage.get(LIST_KEY) || "null");
+    if (cached && cached.list && cached.list.length && Date.now() - cached.at < LIST_TTL) {
+      sources = cached.list;
+      sourcesAt = cached.at;
+      return sources;
+    }
+  } catch (e) {}
+  try {
+    const res = await withTimeout(fetch(LIST_URL, { headers: { "User-Agent": UA } }), 6000);
+    if (res.ok) {
+      const list = parseSites(await res.text());
+      if (list.length >= 3) {
+        sources = list;
+        sourcesAt = Date.now();
+        host.storage.set(LIST_KEY, JSON.stringify({ at: sourcesAt, list }));
+        return sources;
+      }
+    }
+  } catch (e) {}
+  if (!sources) {
+    sources = BUILT_IN;
+    sourcesAt = Date.now();
+  }
+  return sources;
+}
 
 const PER_PAGE = 20;
 const SEARCH_TIMEOUT = 8000;
@@ -78,8 +120,8 @@ async function doubanHot(kind) {
   return out;
 }
 
-function sourceOf(key) {
-  for (const s of SOURCES) {
+async function sourceOf(key) {
+  for (const s of await loadSources()) {
     if (s.key === key) return s;
   }
   return null;
@@ -196,6 +238,7 @@ export async function home() {
 export async function search({ query, offset }) {
   if (!query) return { videos: [] };
   const page = Math.floor((offset || 0) / PER_PAGE) + 1;
+  const SOURCES = await loadSources();
   const results = await Promise.allSettled(
     SOURCES.map((s) => searchOne(s, query, page))
   );
@@ -226,7 +269,7 @@ export async function title({ id }) {
     if (!sr.videos.length) throw new Error("各源都没有「" + name + "」");
     return title({ id: sr.videos[0].id });
   }
-  const source = sourceOf(key);
+  const source = await sourceOf(key);
   if (!source) throw new Error("未知来源 " + key);
   const json = await fetchJSON(source.api, "ids=" + encodeURIComponent(vodId));
   const vod = (json.list || [])[0];
@@ -261,7 +304,7 @@ export async function play({ id }) {
     return play({ id: sr.videos[0].id + "|0" });
   }
   const { vodId, ep } = decodeId(id);
-  const source = sourceOf(key);
+  const source = await sourceOf(key);
   if (!source) throw new Error("未知来源 " + key);
   const index = ep === undefined || ep === "" ? 0 : Number(ep);
   const json = await fetchJSON(source.api, "ids=" + encodeURIComponent(vodId));
