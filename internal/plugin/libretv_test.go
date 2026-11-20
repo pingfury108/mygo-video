@@ -40,6 +40,49 @@ var builtIn = map[string]bool{
 	"ruyi": true, "bfzy": true, "zy360": true, "jisu": true, "lzi": true,
 }
 
+// TestLibreTVRealData walks the whole chain against the deployment with the
+// app's own data folder — the settings and the cached list the listener has.
+func TestLibreTVRealData(t *testing.T) {
+	if os.Getenv("NETWORK") == "" || os.Getenv("REALDATA") == "" {
+		t.Skip("NETWORK or REALDATA is not set")
+	}
+	p, err := Load("../../examples/libretv-plugin", os.Getenv("REALDATA"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+
+	if _, err := p.Home(); err != nil {
+		t.Fatalf("home: %v", err)
+	}
+	sr, err := p.Search("教父", 0)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(sr.Videos) == 0 {
+		t.Fatal("no videos")
+	}
+	for i, v := range sr.Videos {
+		detail, err := p.Title(v.ID)
+		if err != nil {
+			continue // a source may have dropped the title
+		}
+		if len(detail.Episodes) == 0 {
+			continue
+		}
+		pb, err := p.Play(detail.Episodes[0].ID, "")
+		if err != nil {
+			t.Fatalf("play %d (%s): %v", i, v.ID, err)
+		}
+		if pb.URL == "" {
+			t.Fatalf("play %d: no url", i)
+		}
+		t.Logf("chain %d ok: %s -> %d episodes -> %s", i, v.Name, len(detail.Episodes), pb.URL)
+		return // one working chain is enough
+	}
+	t.Fatal("no title of the search resolved to a playable chain")
+}
+
 // TestLibreTVListDown plays with the list address pointing at a dead port:
 // the plugin has to fall back to its own list and still search, resolve a
 // title and hand a stream over.
