@@ -358,25 +358,35 @@ func (a *app) seekBar(c *ui.Context) {
 	x, _, over := slider.PointerPosition()
 	b := slider.Bounds()
 	if over && b.W > 0 {
-		ms := int64(float64(x/b.W) * dur * float64(time.Second))
+		ms := int64(float64(x/b.W) * dur * float64(time.Millisecond))
 		slider = slider.Tooltip(media.HumanDuration(ms))
 	} else {
 		slider = slider.Tooltip("进度")
 	}
-	a.seekDragging = slider.Dragging()
-	// A drag only moves the knob: seeking on every step of it restarts the
-	// remux of a WebDAV video once a frame, and the picture stutters.
-	if a.seekDragging {
+	dragging := slider.Dragging()
+	switch {
+	case dragging:
+		// The hand holds the knob: the seek waits for the let-go, and the
+		// knob holds the hand's place meanwhile.
+		a.seekDrag = true
 		a.seekedAt = time.Now()
 		a.uiShown = time.Now()
-		return
-	}
-	if slider.Changed() {
-		a.seekedAt = time.Now()
+	case slider.Changed() && !a.seekDrag && time.Since(a.seekedAt) > 400*time.Millisecond:
+		// A press that never became a drag reports its value again each
+		// frame the hand trembles: seek on the first of them alone.
 		a.seekHold = true
-		a.seekTo(time.Duration(a.seek * float64(time.Second)))
+		a.seekedAt = time.Now()
 		a.uiShown = time.Now()
+		a.seekTo(time.Duration(a.seek * float64(time.Second)))
+	case a.seekDrag:
+		// The hand let a drag go: the video goes once, where it stopped.
+		a.seekDrag = false
+		a.seekHold = true
+		a.seekedAt = time.Now()
+		a.uiShown = time.Now()
+		a.seekTo(time.Duration(a.seek * float64(time.Second)))
 	}
+	a.seekDragging = dragging
 }
 
 // subtitleLayer shows the cue under the playhead.

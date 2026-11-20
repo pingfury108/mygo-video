@@ -228,6 +228,7 @@ type app struct {
 	seek         float64
 	seekedAt     time.Time
 	seekDragging bool
+	seekDrag     bool
 	seekHold     bool
 	lastSave     time.Time
 	fresh        bool
