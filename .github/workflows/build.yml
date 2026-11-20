@@ -116,10 +116,13 @@ jobs:
         shell: bash
         run: |
           # The linker takes the DLLs from the decoder's own directory,
-          # which the checkout lacks; beside the exe they load at runtime.
-          mkdir -p internal/gpudecode/ffmpeg/bin resources/windows-amd64
-          cp resources/windows-amd64/bin/av*.dll resources/windows-amd64/bin/swresample-*.dll internal/gpudecode/ffmpeg/bin/
-          cp resources/windows-amd64/bin/av*.dll resources/windows-amd64/bin/swresample-*.dll resources/windows-amd64/
+          # which the checkout lacks, under their lib prefix, which -lavcodec-63
+          # finds; beside the exe they load at runtime by their plain names.
+          mkdir -p internal/gpudecode/ffmpeg/bin
+          cd resources/windows-amd64/bin
+          for d in avcodec-63 avformat-63 avutil-61 swresample-7; do cp "$d.dll" "lib$d.dll"; done
+          cp lib*.dll ../../../internal/gpudecode/ffmpeg/bin/
+          cp avcodec-63.dll avformat-63.dll avutil-61.dll swresample-7.dll ../
       - name: check the tool
         shell: bash
         run: |

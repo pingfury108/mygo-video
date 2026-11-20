@@ -8,7 +8,7 @@ package gpudecode
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/ffmpeg/include
-#cgo LDFLAGS: -L${SRCDIR}/ffmpeg/bin -l:avcodec-63.dll -l:avformat-63.dll -l:avutil-61.dll -l:swresample-7.dll -ldxguid -lole32 -luuid
+#cgo LDFLAGS: -L${SRCDIR}/ffmpeg/bin -lavcodec-63 -lavformat-63 -lavutil-61 -lswresample-7 -ldxguid -lole32 -luuid
 
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
