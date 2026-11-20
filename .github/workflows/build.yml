@@ -45,6 +45,9 @@ jobs:
               # 610 driver, which most machines here do not have yet.
               curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/f.zip https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip
               unzip -j /tmp/f.zip "*/bin/ffmpeg.exe" -d out
+              # mpv, which decodes in hardware what Media Foundation cannot.
+              curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/mpv.7z https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261111/mpv-x86_64-20261111-git-bcde6b93cc.7z
+              7z e /tmp/mpv.7z mpv.exe -oout -y
               ;;
             linux-amd64)
               curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/f.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz

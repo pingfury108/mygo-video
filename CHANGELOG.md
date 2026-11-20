@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.17
+
+- Windows plays a video in mpv, drawn into the app's own window: mpv decodes
+  HEVC in hardware and draws the picture with the GPU, so a 4K film plays as
+  it is, where Media Foundation had none of it and a transcode kept the CPU
+  busy. The web view steps aside while mpv runs and comes back when it ends,
+  with the position kept.
+- The mpv of the Windows build comes with the app, and ffmpeg stays for the
+  fallback the other platforms use.
+
 ## 0.1.16
 
 - Transcodes encode with x264 and scale the picture to 1080p at most: on a

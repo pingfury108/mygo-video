@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/Microsoft/go-winio v0.6.4 // indirect
 	github.com/MoeForge/moego v0.1.0-alpha.1 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/cloudflare/circl v1.6.2 // indirect
@@ -22,6 +23,6 @@ require (
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
