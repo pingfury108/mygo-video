@@ -217,6 +217,7 @@ type app struct {
 	searchBox      ui.Handle
 	homeScroll     ui.ScrollState
 	libraryGrid    ui.GridState
+	webdavAllGrid  ui.GridState
 	libraryScroll  ui.ScrollState
 	detailScroll   ui.ScrollState
 	settingsScroll ui.ScrollState
@@ -1278,4 +1279,15 @@ func (a *app) diag(format string, args ...any) {
 	}
 	defer f.Close()
 	fmt.Fprintf(f, "%s %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+}
+
+// hevcSource says the video's picture is HEVC in the hev1 tag.
+func (a *app) hevcSource(url string) bool {
+	if a.ffmpeg == "" || url == "" {
+		return false
+	}
+	cmd := exec.Command(a.ffmpeg, "-hide_banner", "-i", url)
+	executil.Hide(cmd)
+	out, _ := cmd.CombinedOutput()
+	return strings.Contains(string(out), "Video: hevc")
 }

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -265,6 +266,9 @@ func encrypt(t *testing.T, key, iv, plain []byte) []byte {
 // An MP4 whose moov is at its end is remuxed to HLS that the player can
 // stream from.
 func TestHLSRemux(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Media Foundation alone needs the remux; AVFoundation plays the file")
+	}
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		t.Skip("no ffmpeg")

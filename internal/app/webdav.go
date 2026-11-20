@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path"
+	"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -195,12 +196,20 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	if strings.HasSuffix(strings.ToLower(it.RemoteID), ".m3u8") {
 		kind = "hls"
 	}
+	// AVFoundation plays this picture only with the hvcC box the hev1 tag
+	// leaves out, which an fMP4 remux writes.
+	tagHEVC := false
+	if runtime.GOOS == "darwin" && kind == "mp4" && a.hevcSource(it.RemoteID) {
+		kind = "remux"
+		tagHEVC = true
+	}
 	player, token, url, err := a.openStream(streamproxy.Stream{
 		URL:     it.RemoteID,
 		Type:    kind,
 		Headers: a.webdavAuth(),
 		FFmpeg:  a.ffmpeg,
 		Start:   d,
+		TagHEVC: tagHEVC,
 	})
 	if err != nil {
 		a.say("%v", err)
@@ -443,7 +452,8 @@ func (a *app) webdavAllView(c *ui.Context) {
 			a.invalidate()
 		})
 	})
-	if len(a.webdavAllItems) == 0 {
+	n := len(a.webdavAllItems)
+	if n == 0 {
 		if a.webdavScanning {
 			emptyState(c, "正在扫描…", "大目录可能要一会儿，可以取消。", nil)
 		} else {
@@ -451,7 +461,7 @@ func (a *app) webdavAllView(c *ui.Context) {
 		}
 		return
 	}
-	ui.GridView(c, nil, len(a.webdavAllItems), 190, 176, func(i int) {
+	ui.GridView(c, &a.webdavAllGrid, n, 190, 176, func(i int) {
 		a.videoCard(c, a.webdavAllItems[i], 0)
 	}).Grow(1).Padding(8, 32, 36, 32)
 }

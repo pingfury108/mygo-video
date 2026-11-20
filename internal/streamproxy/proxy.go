@@ -61,6 +61,10 @@ type Stream struct {
 	// VideoEncoder is what a transcode encodes the picture with, such as
 	// h264_nvenc; empty uses libx264.
 	VideoEncoder string
+	// TagHEVC marks the picture hvc1, the tag AVFoundation reads the parameter
+	// sets from: the hev1 tag of the files here leaves them in the stream,
+	// where its frame output finds none.
+	TagHEVC bool
 
 	// hls is the remux running for this stream, if any.
 	hls *hlsJob
@@ -157,7 +161,9 @@ func (p *Proxy) Open(s Stream) (string, string, error) {
 		p.mu.Unlock()
 		return p.base + "/s/" + token + "/hls/index.m3u8", token, nil
 	}
-	if s.Type == "mp4" && s.FFmpeg != "" {
+	// Media Foundation plays a file whose index sits at its end no better than
+	// it plays HEVC: it waits, then gives up. AVFoundation reads one as it is.
+	if runtime.GOOS == "windows" && s.Type == "mp4" && s.FFmpeg != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		fast := p.isFaststart(ctx, &s, s.URL)
 		cancel()
@@ -455,14 +461,23 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	} else {
 		args = append(args, "-c", "copy")
 	}
+	if s.TagHEVC {
+		args = append(args, "-tag:v", "hvc1")
+	}
+	// Media Foundation plays HLS of MPEG-TS segments, not of fMP4 ones;
+	// AVFoundation plays fMP4, which carries the hvcC box an hev1 file lacks,
+	// the one its frame output reads.
+	segType, segExt := "mpegts", ".ts"
+	if s.TagHEVC {
+		segType, segExt = "fmp4", ".m4s"
+	}
 	args = append(args,
 		"-f", "hls",
 		"-hls_time", hlsTime,
 		"-hls_playlist_type", "event",
-		// MPEG-TS rather than fMP4: Media Foundation plays HLS of TS
-		// segments, not of fMP4 ones.
-		"-hls_segment_type", "mpegts",
-		"-hls_segment_filename", filepath.Join(dir, "seg%05d.ts"),
+		"-hls_segment_type", segType,
+		"-hls_fmp4_init_filename", "init.mp4",
+		"-hls_segment_filename", filepath.Join(dir, "seg%05d"+segExt),
 		"-hls_flags", "independent_segments",
 		filepath.Join(dir, "index.m3u8"),
 	)
