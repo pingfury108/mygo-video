@@ -126,7 +126,7 @@ func (a *app) thumb(c *ui.Context, it media.Item, prog media.Progress) {
 				ui.Box(c).Grow(float32(1 - prog.Fraction())).Height(3)
 			})
 		}
-		if prog.Started() {
+		if prog.Started() || prog.Done {
 			ui.Text(c, remaining(prog)).Absolute().Right(7).Bottom(6).FontSize(10).FontWeight(600).
 				TextColor(ui.RGBA(255, 255, 255, 0.86))
 		}

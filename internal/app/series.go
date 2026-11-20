@@ -90,8 +90,16 @@ func (a *app) episodeChip(c *ui.Context, ep media.Item, current bool) {
 		ui.Text(c, ep.EpisodeLabel()).FontSize(10).FontWeight(700).TextColor(color)
 		ui.Column(c).Gap(2).Grow(1).Children(func() {
 			status := fmt.Sprintf("第 %d 集", ep.Episode)
-			if prog.Started() {
-				status = fmt.Sprintf("已看 %.0f%%", prog.Fraction()*100)
+			switch {
+			case prog.Done:
+				status = "已看完"
+			case prog.Started():
+				// A part of one percent reads zero, which tells nothing.
+				pct := int(prog.Fraction()*100 + 0.5)
+				if pct < 1 {
+					pct = 1
+				}
+				status = fmt.Sprintf("已看 %d%%", pct)
 			}
 			ui.Text(c, status).FontSize(10.5).TextColor(p.faint).SingleLine()
 		})
