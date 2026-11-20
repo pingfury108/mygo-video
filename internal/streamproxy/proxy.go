@@ -72,6 +72,10 @@ type Stream struct {
 	// wrapped the same way. Empty fetches directly.
 	Relay string
 
+	// inner is the token of the plain forwarding stream a remux or a
+	// transcode of a relayed stream reads through, and closes with its own.
+	inner string
+
 	// hls is the remux running for this stream, if any.
 	hls *hlsJob
 }
@@ -157,6 +161,16 @@ func (p *Proxy) Open(s Stream) (string, string, error) {
 		if s.FFmpeg == "" {
 			return "", "", errors.New("streamproxy: this stream needs ffmpeg")
 		}
+		// A relayed stream takes ffmpeg through the rewritten playlist
+		// instead of the relay itself: ffmpeg resolves a playlist's relative
+		// addresses against the relay's path, where they lose the relay's
+		// secret and the source turns them away.
+		if s.Relay != "" {
+			innerURL, innerToken, err := p.Open(Stream{URL: s.URL, Type: "hls", Headers: s.Headers, Relay: s.Relay})
+			if err == nil {
+				s.URL, s.Relay, s.Headers, s.inner = innerURL, "", nil, innerToken
+			}
+		}
 		job, err := p.startHLS(&s)
 		if err != nil {
 			return "", "", err
@@ -200,6 +214,11 @@ func (p *Proxy) Forget(token string) {
 	p.mu.Lock()
 	s := p.streams[token]
 	delete(p.streams, token)
+	inner := ""
+	if s != nil && s.inner != "" {
+		inner = s.inner
+		delete(p.streams, inner)
+	}
 	p.mu.Unlock()
 	stopHLS(s)
 }
@@ -261,11 +280,13 @@ func (p *Proxy) servePlaylist(w http.ResponseWriter, r *http.Request, s *Stream,
 	defer cancel()
 	resp, err := p.fetch(ctx, s, raw, "")
 	if err != nil {
+		Log("playlist " + raw + ": " + err.Error())
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		Log("playlist " + raw + ": " + resp.Status)
 		http.Error(w, resp.Status, resp.StatusCode)
 		return
 	}
@@ -314,11 +335,13 @@ func (p *Proxy) serveBytes(w http.ResponseWriter, r *http.Request, s *Stream, ra
 	}
 	resp, err := p.fetchMethod(ctx, s, raw, rng, method)
 	if err != nil {
+		Log("segment " + relayed(s, raw) + ": " + err.Error())
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		Log("segment " + relayed(s, raw) + ": " + resp.Status)
 		http.Error(w, resp.Status, resp.StatusCode)
 		return
 	}
