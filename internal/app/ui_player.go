@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -320,6 +321,7 @@ func (a *app) seekTo(d time.Duration) {
 		a.seekWebDAV(d)
 		return
 	}
+	a.seekHold = true
 	pl.Seek(d)
 	a.seek = d.Seconds()
 	a.seekedAt = time.Now()
@@ -339,12 +341,28 @@ func (a *app) seekBar(c *ui.Context) {
 	if dur <= 0 {
 		dur = 1
 	}
-	// The knob follows the playhead only when no hand is on it: pulling it back
-	// mid-drag is what made it jump to and fro.
-	if !a.seekDragging && time.Since(a.seekedAt) > 800*time.Millisecond {
+	// The knob stays where the hand put it until the video answers the seek:
+	// the playhead still tells the old place while a remux restarts, and
+	// following it snaps the knob back and forth.
+	if a.seekHold && (math.Abs(a.playhead().Seconds()-a.seek) < 1.2 || time.Since(a.seekedAt) > 15*time.Second) {
+		a.seekHold = false
+	}
+	// The knob follows the playhead only when nothing holds it: pulling it
+	// back mid-drag is what made it jump to and fro.
+	if !a.seekHold && !a.seekDragging && time.Since(a.seekedAt) > 800*time.Millisecond {
 		a.seek = a.playhead().Seconds()
 	}
-	slider := ui.Slider(c, &a.seek, 0, dur).Grow(1).Tooltip("进度")
+	slider := ui.Slider(c, &a.seek, 0, dur).Grow(1)
+	// Under the pointer the bar names the time it stands for: a click takes
+	// the video straight there.
+	x, _, over := slider.PointerPosition()
+	b := slider.Bounds()
+	if over && b.W > 0 {
+		ms := int64(float64(x/b.W) * dur * float64(time.Second))
+		slider = slider.Tooltip(media.HumanDuration(ms))
+	} else {
+		slider = slider.Tooltip("进度")
+	}
 	a.seekDragging = slider.Dragging()
 	// A drag only moves the knob: seeking on every step of it restarts the
 	// remux of a WebDAV video once a frame, and the picture stutters.
@@ -355,6 +373,7 @@ func (a *app) seekBar(c *ui.Context) {
 	}
 	if slider.Changed() {
 		a.seekedAt = time.Now()
+		a.seekHold = true
 		a.seekTo(time.Duration(a.seek * float64(time.Second)))
 		a.uiShown = time.Now()
 	}
@@ -471,6 +490,7 @@ func (a *app) togglePlay() {
 		pl.Seek(0)
 		pl.Play()
 		a.seek = 0
+		a.seekHold = true
 		a.seekedAt = time.Now()
 	default:
 		pl.Play()

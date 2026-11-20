@@ -228,6 +228,7 @@ type app struct {
 	seek         float64
 	seekedAt     time.Time
 	seekDragging bool
+	seekHold     bool
 	lastSave     time.Time
 	fresh        bool
 	ended        bool
@@ -1078,6 +1079,7 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	a.uiHidden = false
 	a.uiShown = time.Now()
 	a.seekedAt = time.Time{}
+	a.seekHold = false
 	p.SetRate(a.rate)
 	p.SetVolume(a.volume)
 	if !fromStart {
