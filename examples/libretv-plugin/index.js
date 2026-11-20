@@ -24,20 +24,10 @@ const SOURCES = [
 const PER_PAGE = 20;
 const SEARCH_TIMEOUT = 8000;
 
-// The relay is the site's own server, which fetches what the app may not
-// reach, and whose secret is the sha256 of its password in the query. No
-// timestamp: the server takes its absence as no expiry, and a seek an hour
-// in must still fetch through the same address.
-function relayed(url) {
-  const server = (host.setting("relayServer") || "").trim().replace(/\/$/, "");
-  const password = (host.setting("relayPassword") || "").trim();
-  if (!server || !password) return url;
-  const auth = host.crypto.sha256(password);
-  return server + "/proxy/" + encodeURIComponent(url) + "?auth=" + auth;
-}
-
-// What the player plays: the relayed address, and the template the proxy
-// keeps resolving the playlist's addresses through the relay with.
+// What the player plays: the source's own address, with the relay as a
+// template the app's proxy wraps every fetch in — the playlist's relative
+// addresses resolve against the source, and each fetch carries the secret
+// anew.
 function stream(url) {
   const server = (host.setting("relayServer") || "").trim().replace(/\/$/, "");
   const password = (host.setting("relayPassword") || "").trim();
@@ -45,12 +35,10 @@ function stream(url) {
     return { url, type: url.includes(".m3u8") ? "hls" : "mp4" };
   }
   const auth = host.crypto.sha256(password);
-  const template =
-    server + "/proxy/%s?auth=" + auth;
   return {
-    url: relayed(url),
+    url,
     type: "hls",
-    relay: template,
+    relay: server + "/proxy/%s?auth=" + auth,
   };
 }
 

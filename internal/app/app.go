@@ -987,7 +987,7 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 	if pb.Live {
 		fromStart = true
 	}
-	a.retryStream = streamproxy.Stream{URL: videoURL, Audio: audio, Headers: pb.Headers}
+	a.retryStream = streamproxy.Stream{URL: videoURL, Audio: audio, Headers: pb.Headers, Relay: pb.Relay}
 	a.beginPlayback(it, player, fromStart)
 	a.playingQuality = pb.Quality
 	if pb.Live {
