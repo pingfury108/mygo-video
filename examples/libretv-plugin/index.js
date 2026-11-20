@@ -99,7 +99,9 @@ async function doubanHot(kind) {
   for (const s of json.subjects || []) {
     if (!s || !s.title) continue;
     out.push({
-      id: "douban|" + kind + "|" + encodeURIComponent(s.title),
+      id:
+        "douban|" + kind + "|" + encodeURIComponent(s.title) +
+        "|" + encodeURIComponent(s.cover || ""),
       name: s.title,
       poster: s.cover || "",
       overview: s.rate ? "豆瓣评分 " + s.rate : "",
@@ -249,13 +251,17 @@ export async function title({ id }) {
   const { key, vodId } = decodeId(id);
   if (key === "douban") {
     // A Douban card: the parts after the kind carry the title, which the
-    // collection sites answer for. The first hit plays.
+    // collection sites answer for, and the cover, which the app has already
+    // loaded — the sites' own picture would only start over.
     const parts = String(id || "").split("|");
-    const name = decodeURIComponent(parts.slice(2).join("|") || "");
+    const name = decodeURIComponent(parts[2] || "");
+    const cover = decodeURIComponent(parts[3] || "");
     if (!name) throw new Error("这个条目没有名字");
     const sr = await search({ query: name, offset: 0 });
     if (!sr.videos.length) throw new Error("各源都没有「" + name + "」");
-    return title({ id: sr.videos[0].id });
+    const detail = await title({ id: sr.videos[0].id });
+    if (cover) detail.video.poster = cover;
+    return detail;
   }
   const source = await sourceOf(key);
   if (!source) throw new Error("未知来源 " + key);
