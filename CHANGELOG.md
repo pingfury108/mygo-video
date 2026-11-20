@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.18
+
+- Windows plays a 4K HEVC video on the GPU: libavcodec decodes it with
+  Direct3D 11 and the renderer draws the texture where the decoder left it,
+  through a shared one a video processor turned from NV12 to BGRA on the GPU.
+  The sound plays through WASAPI, and its device position is the clock the
+  picture follows. A transcode, which kept the CPU busy beside a picture it
+  could not carry at 4K, is gone from this path.
+- macOS plays it as it is too: an fMP4 remux writes the hvcC box that the
+  hev1 tag leaves out, which the frame output AVFoundation gives MyGo reads.
+  The stream is copied, not encoded, so the picture is the file's own.
+- The player's controls: a click on the picture pauses it and the bars over it
+  keep their own presses, the progress bar sits between the steps and the
+  sound, every control says what it does when the pointer rests on it, the
+  rate opens a list from 0.5× to 2×, and a drag of the progress bar seeks once
+  when it ends, rather than restarting the remux at every step.
+- Episodes fill the width of their row, and the title bar drags the window
+  again, as it did before the bars over the picture grew.
+
 ## 0.1.17
 
 - Windows plays a video in mpv, drawn into the app's own window: mpv decodes

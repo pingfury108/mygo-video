@@ -48,6 +48,11 @@ jobs:
               # mpv, which decodes in hardware what Media Foundation cannot.
               curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/mpv.7z https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261111/mpv-x86_64-20261111-git-bcde6b93cc.7z
               7z e /tmp/mpv.7z mpv.exe -oout -y
+              # The shared libavcodec the GPU decoder links, whose headers sit in
+              # internal/gpudecode/ffmpeg/include: the same release, so the ABIs
+              # match.
+              curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/shared.7z https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z
+              7z e /tmp/shared.7z "ffmpeg-*/bin/avcodec-*.dll" "ffmpeg-*/bin/avformat-*.dll" "ffmpeg-*/bin/avutil-*.dll" "ffmpeg-*/bin/swresample-*.dll" -oout -y
               ;;
             linux-amd64)
               curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/f.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
@@ -92,6 +97,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: install mingw, which cgo needs on Windows
+        if: matrix.target == 'windows-amd64'
+        shell: pwsh
+        run: |
+          choco install mingw -y --no-progress
+          "C:\ProgramData\mingw64\mingw64\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - uses: actions/download-artifact@v4
         with:
           name: tools-${{ matrix.target }}

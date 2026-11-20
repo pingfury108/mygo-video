@@ -70,7 +70,9 @@ func (a *app) selectEpisode(ep media.Item) {
 func (a *app) episodeChip(c *ui.Context, ep media.Item, current bool) {
 	p := colors()
 	prog, _ := a.store.Progress(ep.ID)
-	b := ui.ButtonBase(c).Width(118).Height(44).Radius(8).PaddingX(10).Gap(8).
+	// A row holds six episodes, and each takes its sixth of the width: a
+	// fixed width left the rest of the row empty.
+	b := ui.ButtonBase(c).Grow(1).Height(44).Radius(8).PaddingX(10).Gap(8).
 		AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(ep.EpisodeLabel())
 	b.Background(p.panel)
 	switch {

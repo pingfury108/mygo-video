@@ -222,14 +222,15 @@ type app struct {
 	detailScroll   ui.ScrollState
 	settingsScroll ui.ScrollState
 
-	player   *ui.VideoPlayer
-	playing  media.Item
-	volume   float64
-	seek     float64
-	seekedAt time.Time
-	lastSave time.Time
-	fresh    bool
-	ended    bool
+	player       *ui.VideoPlayer
+	playing      media.Item
+	volume       float64
+	seek         float64
+	seekedAt     time.Time
+	seekDragging bool
+	lastSave     time.Time
+	fresh        bool
+	ended        bool
 
 	// quality is what to ask a plugin for, and playingQuality what it gave.
 	quality        string

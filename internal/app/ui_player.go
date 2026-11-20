@@ -16,7 +16,7 @@ import (
 // a video keeps playing.
 const hideAfter = 3 * time.Second
 
-var rates = []float64{1, 1.25, 1.5, 2}
+var rates = []float64{0.5, 0.75, 1, 1.25, 1.5, 2}
 
 // playerPage shows the video, over everything, with its controls on top.
 func (a *app) playerPage(c *ui.Context) {
@@ -68,9 +68,10 @@ func (a *app) playerPage(c *ui.Context) {
 			a.uiHidden = false
 		}
 	}
-	root.OnClick(a.togglePlay)
 	root.Children(func() {
-		ui.Video(c, pl).Fill().Fit(ui.Contain)
+		// A click on the picture pauses it; the bars over it keep their own
+		// clicks, and a press there does not reach the picture.
+		ui.Video(c, pl).Fill().Fit(ui.Contain).OnClick(a.togglePlay)
 		a.subtitleLayer(c)
 		a.danmakuLayer(c)
 		a.playerTop(c)
@@ -108,8 +109,10 @@ func (a *app) playerTop(c *ui.Context) {
 	// Under the window's controls, as a sidebar starts: the title bar of a
 	// video draws them over the picture, and nothing of ours goes in it.
 	padTop := c.TitleBar().Bottom + 8
+	// The page fills the window, the title bar included: a press on this bar
+	// drags the window, rather than pause the picture below it.
 	top := ui.Row(c).Absolute().Top(0).Left(0).Right(0).Height(padTop+56).
-		Padding(padTop, 20, 0, 20).Gap(12).
+		Padding(padTop, 20, 0, 20).Gap(12).DragWindow().
 		AlignItems(ui.Center).Gradient(ui.RGBA(0, 0, 0, 0.72), ui.Transparent, 180).
 		Opacity(shown).IgnoreInput(a.uiHidden)
 	top.Children(func() {
@@ -143,14 +146,7 @@ func (a *app) playerControls(c *ui.Context) {
 		Gradient(ui.Transparent, ui.RGBA(0, 0, 0, 0.88), 180).
 		Opacity(shown).IgnoreInput(a.uiHidden)
 	bar.Children(func() {
-		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, media.HumanDuration(a.playhead().Milliseconds())).
-				FontSize(11).TextColor(white).Width(54).TextAlign(ui.End)
-			a.seekBar(c)
-			ui.Text(c, media.HumanDuration(a.playLength().Milliseconds())).
-				FontSize(11).TextColor(white).Width(54)
-		})
-		ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			icon := iconPlay
 			if pl.Playing() {
 				icon = iconPause
@@ -170,7 +166,15 @@ func (a *app) playerControls(c *ui.Context) {
 			playerButton(c, iconBack, 15, "后退 10 秒", false, func() { a.seekBy(-10 * time.Second) })
 			playerButton(c, iconForward, 15, "快进 10 秒", false, func() { a.seekBy(10 * time.Second) })
 
-			ui.Box(c).Width(6)
+			// The playhead sits between the steps and the sound: the bar that
+			// seeks, with how far it stands at either end.
+			ui.Text(c, media.HumanDuration(a.playhead().Milliseconds())).
+				FontSize(11).TextColor(white).Width(46).TextAlign(ui.End)
+			a.seekBar(c)
+			ui.Text(c, media.HumanDuration(a.playLength().Milliseconds())).
+				FontSize(11).TextColor(white).Width(46)
+
+			ui.Box(c).Width(2)
 			volumeIcon := iconVolume
 			if a.volume <= 0.001 {
 				volumeIcon = iconMute
@@ -183,17 +187,15 @@ func (a *app) playerControls(c *ui.Context) {
 				}
 				a.invalidate()
 			})
-			if v := ui.Slider(c, &a.volume, 0, 1).Width(92); v.Changed() {
+			if v := ui.Slider(c, &a.volume, 0, 1).Width(92).Tooltip("音量"); v.Changed() {
 				a.setVolume(a.volume)
 			}
-
-			ui.Box(c).Grow(1)
 
 			if len(a.subs) > 0 {
 				playerButton(c, iconSubs, 17, "字幕", a.subsOn, a.toggleSubtitles)
 			}
 			if len(a.danmaku) > 0 || a.danmakuBusy {
-				dm := ui.ButtonBase(c).Height(30).PaddingX(8).Radius(7).Label("弹幕").FocusRing(false)
+				dm := ui.ButtonBase(c).Height(30).PaddingX(8).Radius(7).Label("弹幕").FocusRing(false).Tooltip("弹幕开关")
 				dmColor := ui.RGBA(255, 255, 255, 0.82)
 				if a.danmakuOn {
 					dmColor = colors().accent
@@ -207,21 +209,20 @@ func (a *app) playerControls(c *ui.Context) {
 					ui.Text(c, "弹").FontSize(11).FontWeight(600)
 				})
 			}
-			rate := ui.ButtonBase(c).Height(30).PaddingX(8).Radius(7).Label("倍速").FocusRing(false)
+			// The rate opens a list: slow or fast, where the viewer picks one.
 			rateColor := ui.RGBA(255, 255, 255, 0.82)
 			if a.rate != 1 {
 				rateColor = colors().accent
 			}
-			rate.TextColor(rateColor)
-			if rate.Hovered() {
-				rate.Background(ui.RGBA(255, 255, 255, 0.12))
-			}
-			rate.OnClick(a.cycleRate)
-			rate.Children(func() {
-				ui.Text(c, rateLabel(a.rate)).FontSize(11).FontWeight(600)
-			})
+			ui.MenuButton(c, rateLabel(a.rate), func(m *ui.Menu) {
+				for _, r := range rates {
+					if m.Item(rateLabel(r)).Checked(a.rate == r).Chosen() {
+						a.setRate(r)
+					}
+				}
+			}).Height(30).TextColor(rateColor).Tooltip("播放速度")
 			if a.pluginQualitySource() {
-				q := ui.ButtonBase(c).Height(30).PaddingX(8).Radius(7).Label("清晰度").FocusRing(false)
+				q := ui.ButtonBase(c).Height(30).PaddingX(8).Radius(7).Label("清晰度").FocusRing(false).Tooltip("清晰度")
 				q.TextColor(ui.RGBA(255, 255, 255, 0.82))
 				if q.Hovered() {
 					q.Background(ui.RGBA(255, 255, 255, 0.12))
@@ -249,7 +250,7 @@ func (a *app) playerControls(c *ui.Context) {
 // playerButton is a control over the video, drawn light on black.
 func playerButton(c *ui.Context, icon *ui.SVG, size float32, label string, active bool, onClick func()) ui.Element {
 	p := colors()
-	b := ui.ButtonBase(c).Size(size+18, size+18).Center().Radius(8).Label(label).FocusRing(false)
+	b := ui.ButtonBase(c).Size(size+18, size+18).Center().Radius(8).Label(label).FocusRing(false).Tooltip(label)
 	color := ui.RGBA(255, 255, 255, 0.82)
 	if active {
 		color = p.accent
@@ -323,10 +324,20 @@ func (a *app) seekBar(c *ui.Context) {
 	if dur <= 0 {
 		dur = 1
 	}
-	if time.Since(a.seekedAt) > 800*time.Millisecond {
+	// The knob follows the playhead only when no hand is on it: pulling it back
+	// mid-drag is what made it jump to and fro.
+	if !a.seekDragging && time.Since(a.seekedAt) > 800*time.Millisecond {
 		a.seek = a.playhead().Seconds()
 	}
-	slider := ui.Slider(c, &a.seek, 0, dur).Grow(1)
+	slider := ui.Slider(c, &a.seek, 0, dur).Grow(1).Tooltip("进度")
+	a.seekDragging = slider.Dragging()
+	// A drag only moves the knob: seeking on every step of it restarts the
+	// remux of a WebDAV video once a frame, and the picture stutters.
+	if a.seekDragging {
+		a.seekedAt = time.Now()
+		a.uiShown = time.Now()
+		return
+	}
 	if slider.Changed() {
 		a.seekedAt = time.Now()
 		a.seekTo(time.Duration(a.seek * float64(time.Second)))
@@ -388,7 +399,7 @@ func (a *app) drawerEpisode(c *ui.Context, ep media.Item) {
 	p := colors()
 	current := ep.ID == a.playing.ID
 	b := ui.ButtonBase(c).Height(40).PaddingX(10).Gap(10).Radius(7).
-		AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(ep.EpisodeLabel())
+		AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(ep.EpisodeLabel()).Tooltip(ep.Name)
 	switch {
 	case current:
 		b.Background(ui.RGBA(231, 162, 94, 0.14))
@@ -505,21 +516,6 @@ func (a *app) cycleQuality() {
 	a.invalidate()
 }
 
-func (a *app) cycleRate() {
-	next := rates[0]
-	for i, r := range rates {
-		if a.rate == r {
-			next = rates[(i+1)%len(rates)]
-			break
-		}
-	}
-	a.rate = next
-	a.store.SetRate(next)
-	a.player.SetRate(next)
-	a.uiShown = time.Now()
-	a.invalidate()
-}
-
 func (a *app) toggleFullScreen() {
 	if a.win != nil {
 		a.win.ToggleFullScreen()
@@ -544,4 +540,15 @@ func (a *app) playingSourceName() string {
 		return pe.man.Name
 	}
 	return a.playing.Source
+}
+
+// setRate plays the video at r, keeping it for the next one.
+func (a *app) setRate(r float64) {
+	a.rate = r
+	a.store.SetRate(r)
+	if a.player != nil {
+		a.player.SetRate(r)
+	}
+	a.uiShown = time.Now()
+	a.invalidate()
 }
