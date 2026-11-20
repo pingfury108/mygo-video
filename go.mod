@@ -11,7 +11,6 @@ require (
 )
 
 require (
-	github.com/Microsoft/go-winio v0.6.4 // indirect
 	github.com/MoeForge/moego v0.1.0-alpha.1 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/cloudflare/circl v1.6.2 // indirect
@@ -26,3 +25,5 @@ require (
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
+
+replace github.com/egoist/mygo => github.com/pingfury108/mygo v0.10.1-0.20261120081535-1f28adf5faca

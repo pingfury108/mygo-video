@@ -1,3 +1,6 @@
 .mygo/
 build/
 .DS_Store
+
+# ffmpeg shared libraries, fetched by the build
+internal/gpudecode/ffmpeg/bin/

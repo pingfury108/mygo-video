@@ -177,6 +177,20 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 		a.webdavDuration = 0
 		a.webdavDurationID = it.ID
 	}
+	// The GPU decoder plays the file as it is, inside this window: the
+	// picture stays on the GPU, and the transcode below is only for the
+	// system's player, which has no HEVC decoder.
+	if p, ok := a.gpuPlayer(it); ok {
+		if d > 0 {
+			p.Seek(d)
+		}
+		a.beginPlayback(it, p, true)
+		return
+	}
+	// mpv plays it in a window of its own, where the sound keeps its clock.
+	if a.playMPV(it, d) {
+		return
+	}
 	kind := "mp4"
 	if strings.HasSuffix(strings.ToLower(it.RemoteID), ".m3u8") {
 		kind = "hls"

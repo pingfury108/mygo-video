@@ -23,7 +23,6 @@ import (
 	"mygo-video/internal/iptv"
 	"mygo-video/internal/local"
 	"mygo-video/internal/media"
-	"mygo-video/internal/mpv"
 	"mygo-video/internal/plugin"
 	"mygo-video/internal/store"
 	"mygo-video/internal/streamproxy"
@@ -101,11 +100,7 @@ type app struct {
 	hevcExtChecked bool
 	// errLogged is the item whose player error is already in the log.
 	errLogged string
-	// mpvPlayer is the mpv process a video plays in, where it is used, and
-	// mpvURL the address it was given.
-	mpvPlayer *mpv.Player
-	mpvURL    string
-	mpvStart  time.Duration
+
 	// sourceMenu shows the list of sources, from the sidebar's foot.
 	sourceMenu bool
 
@@ -799,7 +794,7 @@ func (a *app) play(it media.Item, fromStart bool) {
 		a.extractSubs(it)
 	}
 	a.retryStream = streamproxy.Stream{URL: it.Path}
-	a.mpvURL, a.mpvStart = it.Path, 0
+
 	a.beginPlayback(it, p, fromStart)
 }
 
@@ -840,7 +835,7 @@ func (a *app) openStream(s streamproxy.Stream) (*ui.VideoPlayer, string, string,
 		a.diag("open stream failed: %v", err)
 		return nil, "", "", err
 	}
-	a.mpvURL, a.mpvStart = url, s.Start
+
 	player, err := video.OpenURL(url)
 	if err == nil {
 		return player, token, url, nil
@@ -959,6 +954,17 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 		a.say("这个流需要 ffmpeg：设置 → 工具")
 		return
 	}
+	// A file plays here, its picture kept on the GPU; mpv takes it where that
+	// fails, in a window of its own.
+	if !pb.Live && kind != "dash" && kind != "flv" {
+		if p, ok := a.gpuPlayer(it); ok {
+			a.beginPlayback(it, p, fromStart)
+			return
+		}
+		if a.playMPV(it, 0) {
+			return
+		}
+	}
 	player, token, _, err := a.openStream(streamproxy.Stream{
 		URL:     videoURL,
 		Type:    kind,
@@ -1039,12 +1045,14 @@ func (a *app) retryPlayback() {
 	a.diag("retried with %s: %s", s.Type, s.URL)
 }
 
-// beginPlayback makes p the video showing, from where the listener stopped
-// unless asked to start over.
 func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
-	if a.mpvReady() && a.mpvURL != "" {
-		a.beginMPV(it, p, fromStart)
-		return
+	// A caller that already plays the video on the GPU passes its player; one
+	// that has the system's player gets the GPU one here, where it takes the
+	// codec.
+	if p == nil {
+		if g, ok := a.gpuPlayer(it); ok {
+			p = g
+		}
 	}
 	if it.Source != "webdav" {
 		a.webdavHLS = false
@@ -1080,97 +1088,7 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	a.invalidate()
 }
 
-// mpvReady says a video plays in mpv, which decodes in hardware what the
-// system's media framework cannot, and Windows is where it is wired.
-func (a *app) mpvReady() bool {
-	if runtime.GOOS != "windows" {
-		return false
-	}
-	_, err := os.Stat(a.mpvBin())
-	return err == nil
-}
-
-// mpvBin is the mpv beside ffmpeg, which is where the installer puts it.
-func (a *app) mpvBin() string {
-	dir := ""
-	if a.ffmpeg != "" {
-		dir = filepath.Dir(a.ffmpeg)
-	}
-	return filepath.Join(dir, "mpv.exe")
-}
-
-// beginMPV plays the video in an mpv process drawn into this window: the web
-// view is hidden while it runs, so the picture shows, and shown again when it
-// ends.
-func (a *app) beginMPV(it media.Item, p *ui.VideoPlayer, fromStart bool) {
-	a.playing = it
-	a.current = it
-	a.errLogged = ""
-	a.playingQuality = ""
-	a.danmaku = nil
-	a.playStarted = time.Now()
-	a.fresh = fromStart
-	a.route = pagePlayer
-	a.drawer = false
-	a.ended = false
-	a.uiHidden = false
-	start := a.mpvStart
-	if !fromStart && start == 0 {
-		if prog, ok := a.store.Progress(it.ID); ok && prog.Started() {
-			start = time.Duration(prog.Position) * time.Millisecond
-		}
-	}
-	url, bin, hwnd := a.mpvURL, a.mpvBin(), a.win.NativeHandle()
-	a.diag("mpv: %s from %v", url, start)
-	if p != nil {
-		p.Close()
-	}
-	a.invalidate()
-	go func() {
-		pl, err := mpv.Start(bin, url, start, hwnd)
-		if err != nil {
-			mygo.RunOnMain(func() {
-				a.mpvURL = ""
-				a.say("mpv 打不开这个视频: %v", err)
-			})
-			return
-		}
-		a.mpvPlayer = pl
-		_ = pl.Wait()
-		pos := pl.Position()
-		pl.Reveal()
-		mygo.RunOnMain(func() {
-			a.mpvPlayer = nil
-			a.mpvURL = ""
-			a.saveMPVProgress(it, pos)
-			a.leavePlayer()
-		})
-	}()
-}
-
-// saveMPVProgress writes where the video stood when mpv ended.
-func (a *app) saveMPVProgress(it media.Item, pos time.Duration) {
-	if it.ID == "" || it.Source == "iptv" || it.Live || pos <= 0 {
-		return
-	}
-	prev, ok := a.store.Progress(it.ID)
-	ms := pos.Milliseconds()
-	if ok && prev.Started() && !a.fresh && ms < 1000 {
-		return
-	}
-	if ok && prev.Position == ms {
-		return
-	}
-	prog := prev
-	prog.Position = ms
-	a.store.SetProgress(it.ID, prog)
-}
-
 func (a *app) leavePlayer() {
-	if a.mpvPlayer != nil {
-		a.mpvPlayer.Stop()
-		a.mpvPlayer = nil
-	}
 	a.closePlayer()
 	a.seek = 0
 	a.drawer = false
