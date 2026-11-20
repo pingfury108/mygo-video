@@ -6,8 +6,21 @@
   "main": "index.js",
   "description": "聚合搜索十三个 CMS 采集站，m3u8 直连播放。自部署自用。",
   "playback": "stream",
+  "settings": [
+    {
+      "key": "relayServer",
+      "label": "中转服务器",
+      "help": "如 https://tv.pingfury.top，填了播放就走它；不填直连源站"
+    },
+    {
+      "key": "relayPassword",
+      "label": "站点密码",
+      "help": "中转服务器的 PASSWORD，只在填了中转服务器时用"
+    }
+  ],
   "permissions": {
     "network": [
+      "movie.douban.com",
       "caiji.dyttzyapi.com",
       "cj.rycjapi.com",
       "bfzyapi.com",
@@ -21,6 +34,7 @@
       "m3u8.apiyhzy.com",
       "ikunzyapi.com",
       "cj.lziapi.com"
-    ]
+    ],
+    "streamHosts": ["*"]
   }
 }

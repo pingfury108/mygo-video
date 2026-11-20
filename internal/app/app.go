@@ -948,7 +948,7 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 	}
 	a.diag("play source=%s type=%s live=%v ffmpeg=%q", it.Source, kind, pb.Live, a.ffmpeg)
 	if p := a.pluginByID(it.Source); p != nil {
-		if !p.AllowsHost(videoURL) || (audio != "" && !p.AllowsHost(audio)) {
+		if !p.AllowsStreamHost(videoURL) || (audio != "" && !p.AllowsStreamHost(audio)) {
 			a.say("这个来源没有访问该地址的权限")
 			return
 		}
@@ -975,6 +975,7 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 		Audio:   audio,
 		Headers: pb.Headers,
 		FFmpeg:  a.ffmpeg,
+		Relay:   pb.Relay,
 	})
 	if err != nil {
 		a.say("%v", err)

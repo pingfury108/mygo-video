@@ -212,6 +212,10 @@ type Playback struct {
 	Quality string `json:"quality,omitempty"`
 	// Dash is a picture and its sound kept apart, which the proxy joins.
 	Dash *Dash `json:"dash,omitempty"`
+	// Relay is the template every fetch of the stream goes through, as a
+	// collection site's own server takes it: %s carries the source's
+	// address, escaped. Empty fetches directly.
+	Relay string `json:"relay,omitempty"`
 }
 
 // Dash is a video and its sound at two addresses of their own.

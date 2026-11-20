@@ -24,6 +24,72 @@ const SOURCES = [
 const PER_PAGE = 20;
 const SEARCH_TIMEOUT = 8000;
 
+// The relay is the site's own server, which fetches what the app may not
+// reach, and whose secret is the sha256 of its password in the query. No
+// timestamp: the server takes its absence as no expiry, and a seek an hour
+// in must still fetch through the same address.
+function relayed(url) {
+  const server = (host.setting("relayServer") || "").trim().replace(/\/$/, "");
+  const password = (host.setting("relayPassword") || "").trim();
+  if (!server || !password) return url;
+  const auth = host.crypto.sha256(password);
+  return server + "/proxy/" + encodeURIComponent(url) + "?auth=" + auth;
+}
+
+// What the player plays: the relayed address, and the template the proxy
+// keeps resolving the playlist's addresses through the relay with.
+function stream(url) {
+  const server = (host.setting("relayServer") || "").trim().replace(/\/$/, "");
+  const password = (host.setting("relayPassword") || "").trim();
+  if (!server || !password) {
+    return { url, type: url.includes(".m3u8") ? "hls" : "mp4" };
+  }
+  const auth = host.crypto.sha256(password);
+  const template =
+    server + "/proxy/%s?auth=" + auth;
+  return {
+    url: relayed(url),
+    type: "hls",
+    relay: template,
+  };
+}
+
+// The site's front page: Douban's hot lists. The plugin asks Douban
+// directly, which the browser could not (no CORS), and bridges a card to
+// the collection sites by searching for its title.
+const DOUBAN = "https://movie.douban.com/j/search_subjects";
+
+async function doubanHot(kind) {
+  const url =
+    DOUBAN +
+    "?type=" +
+    kind +
+    "&tag=%E7%83%AD%E9%97%A8&sort=recommend&page_limit=25&page_start=0";
+  const res = await withTimeout(
+    fetch(url, {
+      headers: {
+        "User-Agent": UA,
+        Referer: "https://movie.douban.com/",
+        Accept: "application/json, text/plain, */*",
+      },
+    }),
+    SEARCH_TIMEOUT
+  );
+  if (!res.ok) throw new Error("豆瓣返回 " + res.status);
+  const json = await res.json();
+  const out = [];
+  for (const s of json.subjects || []) {
+    if (!s || !s.title) continue;
+    out.push({
+      id: "douban|" + kind + "|" + encodeURIComponent(s.title),
+      name: s.title,
+      poster: s.cover || "",
+      overview: s.rate ? "豆瓣评分 " + s.rate : "",
+    });
+  }
+  return out;
+}
+
 function sourceOf(key) {
   for (const s of SOURCES) {
     if (s.key === key) return s;
@@ -112,21 +178,16 @@ async function searchOne(source, query, page) {
 }
 
 export async function home() {
-  const cats = ["电影", "电视剧", "综艺", "动漫"];
-  const sections = await Promise.all(
-    cats.map(async (cat) => {
-      try {
-        const videos = await searchOne(SOURCES[1], cat, 1);
-        return { title: cat, videos: videos.slice(0, 8) };
-      } catch (e) {
-        return { title: cat, videos: [] };
-      }
-    })
-  );
-  return {
-    title: "LibreTV",
-    sections: sections.filter((s) => s.videos.length > 0),
-  };
+  const out = [];
+  await Promise.allSettled([
+    doubanHot("movie").then((v) => {
+      if (v.length) out.push({ title: "豆瓣热门电影", videos: v });
+    }),
+    doubanHot("tv").then((v) => {
+      if (v.length) out.push({ title: "豆瓣热门剧集", videos: v });
+    }),
+  ]);
+  return { title: "LibreTV", sections: out };
 }
 
 export async function search({ query, offset }) {
@@ -152,6 +213,16 @@ export async function search({ query, offset }) {
 
 export async function title({ id }) {
   const { key, vodId } = decodeId(id);
+  if (key === "douban") {
+    // A Douban card: the parts after the kind carry the title, which the
+    // collection sites answer for. The first hit plays.
+    const parts = String(id || "").split("|");
+    const name = decodeURIComponent(parts.slice(2).join("|") || "");
+    if (!name) throw new Error("这个条目没有名字");
+    const sr = await search({ query: name, offset: 0 });
+    if (!sr.videos.length) throw new Error("各源都没有「" + name + "」");
+    return title({ id: sr.videos[0].id });
+  }
   const source = sourceOf(key);
   if (!source) throw new Error("未知来源 " + key);
   const json = await fetchJSON(source.api, "ids=" + encodeURIComponent(vodId));
@@ -185,9 +256,5 @@ export async function play({ id }) {
   const eps = bestSource(vod) || [];
   const pick = eps[index] || eps[0];
   if (!pick) throw new Error("这一集没有播放地址");
-  const url = String(pick.url);
-  return {
-    url,
-    type: url.includes(".m3u8") ? "hls" : "mp4",
-  };
+  return stream(String(pick.url));
 }

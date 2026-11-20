@@ -17,6 +17,7 @@ package plugin
 import (
 	"crypto/aes"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -68,6 +69,11 @@ type Permissions struct {
 	// Network lists the hosts fetch can reach, *.example.com for those below
 	// it, and * for any.
 	Network []string `json:"network,omitempty"`
+	// StreamHosts lists the hosts of the addresses a plugin may hand the app
+	// to play, *.example.com for those below it, and * for any. A source
+	// like a collection site speaks from a new CDN every week, which no
+	// list can name; the plugin's fetch stays inside Network regardless.
+	StreamHosts []string `json:"streamHosts,omitempty"`
 }
 
 // Login is the page a plugin signs in on, and the hosts whose cookies the
@@ -477,6 +483,10 @@ func (p *Plugin) installHost(v *vm) error {
 				sum := md5.Sum([]byte(moejs.Arg(args, 0).String()))
 				return moejs.String(hex.EncodeToString(sum[:])), nil
 			}),
+			"sha256": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				sum := sha256.Sum256([]byte(moejs.Arg(args, 0).String()))
+				return moejs.String(hex.EncodeToString(sum[:])), nil
+			}),
 			"aesEcbEncrypt": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 				out, err := aesECB([]byte(moejs.Arg(args, 0).String()), []byte(moejs.Arg(args, 1).String()))
 				if err != nil {
@@ -695,12 +705,22 @@ func (p *Plugin) Can(what string) bool { return p.exports[what] }
 // AllowsHost reports whether the plugin may reach a URL's host: the network
 // permission names it, or *.
 func (p *Plugin) AllowsHost(raw string) bool {
+	return p.allowsHost(p.manifest.Permissions.Network, raw)
+}
+
+// AllowsStreamHost reports whether the plugin may hand the app an address to
+// play: the streamHosts permission names its host, or *.
+func (p *Plugin) AllowsStreamHost(raw string) bool {
+	return p.allowsHost(p.manifest.Permissions.StreamHosts, raw)
+}
+
+func (p *Plugin) allowsHost(list []string, raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return false
 	}
 	host := u.Hostname()
-	for _, h := range p.manifest.Permissions.Network {
+	for _, h := range list {
 		if h == "*" || h == host {
 			return true
 		}

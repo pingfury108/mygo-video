@@ -65,6 +65,12 @@ type Stream struct {
 	// sets from: the hev1 tag of the files here leaves them in the stream,
 	// where its frame output finds none.
 	TagHEVC bool
+	// Relay is a template every fetch of this stream goes through, as
+	// "https://relay.example/proxy/%s?auth=...": %s takes the source's
+	// address, escaped. A source the app may not reach asks for it, and the
+	// addresses a playlist names are resolved against their own host, then
+	// wrapped the same way. Empty fetches directly.
+	Relay string
 
 	// hls is the remux running for this stream, if any.
 	hls *hlsJob
@@ -275,7 +281,14 @@ func (p *Proxy) servePlaylist(w http.ResponseWriter, r *http.Request, s *Stream,
 		w.Write(body)
 		return
 	}
-	base := resp.Request.URL
+	// Relative addresses resolve against the source's own address, not the
+	// relay's: the relay carries the source escaped in its path, and a path
+	// named here would belong to it, which no source answers.
+	base, err := url.Parse(raw)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Write(p.rewrite(body, base, token))
 }
@@ -443,7 +456,7 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		}
 		args = append(args, "-i", u)
 	}
-	addInput(s.URL)
+	addInput(relayed(s, s.URL))
 	if s.Audio != "" {
 		addInput(s.Audio)
 		args = append(args, "-map", "0:v:0", "-map", "1:a:0")
@@ -593,8 +606,18 @@ func (p *Proxy) fetch(ctx context.Context, s *Stream, raw, rng string) (*http.Re
 	return p.fetchMethod(ctx, s, raw, rng, http.MethodGet)
 }
 
+// relayed wraps a source address in the stream's relay template, which a
+// source the app cannot reach directly asks for: the wrapper carries the
+// address escaped in its path, and vouches for the request at its end.
+func relayed(s *Stream, raw string) string {
+	if s.Relay == "" {
+		return raw
+	}
+	return fmt.Sprintf(s.Relay, url.PathEscape(raw))
+}
+
 func (p *Proxy) fetchMethod(ctx context.Context, s *Stream, raw, rng, method string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, raw, nil)
+	req, err := http.NewRequestWithContext(ctx, method, relayed(s, raw), nil)
 	if err != nil {
 		return nil, err
 	}
