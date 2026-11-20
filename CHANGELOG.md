@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.16
+
+- Transcodes encode with x264 and scale the picture to 1080p at most: on a
+  Pascal card (GTX 1050 Ti) with driver 582.78, NVENC took the first frame
+  and crashed (0xc0000005) with ffmpeg 7.1 and exited silently with 4.4.1,
+  while x264 4K-to-1080p kept a 0.93x pace, close enough to playback. The GPU
+  encoder probe is gone with it.
+- On Windows a transcode decodes with d3d11va, the one that takes HEVC.
+
 ## 0.1.15
 
 - The GPU encoder check writes a file instead of stdout: a windowed app has

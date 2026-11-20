@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -428,7 +429,7 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	if transcode {
 		// The GPU decodes what the player cannot, which is far faster than
 		// the CPU.
-		args = append(args, "-hwaccel", "auto")
+		args = append(args, "-hwaccel", hwaccelName())
 	}
 	addInput := func(u string) {
 		if h := headerLines(s.Headers); h != "" {
@@ -446,6 +447,9 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		hlsTime = "2"
 	}
 	if transcode {
+		// x264 encodes 1080p faster than playback; a 4K picture it cannot
+		// keep up with, so the picture is scaled down to 1080p at most.
+		args = append(args, "-vf", "scale=-2:min(ih\\,1080)")
 		args = append(args, encoderArgs(s.VideoEncoder)...)
 		args = append(args, "-c:a", "aac", "-b:a", "128k")
 	} else {
@@ -533,6 +537,15 @@ func (p *Proxy) serveHLS(w http.ResponseWriter, r *http.Request, s *Stream, name
 
 // encoderArgs is how a transcode encodes its picture: the GPU's encoder where
 // there is one, which keeps up with a 4K picture, else x264.
+// hwaccelName is the decoder a transcode asks for: d3d11va on Windows, where
+// it is the one that takes HEVC, else whatever ffmpeg picks.
+func hwaccelName() string {
+	if runtime.GOOS == "windows" {
+		return "d3d11va"
+	}
+	return "auto"
+}
+
 func encoderArgs(enc string) []string {
 	switch enc {
 	case "h264_nvenc":

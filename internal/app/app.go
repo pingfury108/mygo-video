@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -99,8 +98,6 @@ type app struct {
 	// hevcExt is whether Microsoft's HEVC decoder is installed, checked once.
 	hevcExt        bool
 	hevcExtChecked bool
-	// videoEncoder is the encoder a transcode uses, picked once.
-	videoEncoder string
 	// errLogged is the item whose player error is already in the log.
 	errLogged string
 	// sourceMenu shows the list of sources, from the sidebar's foot.
@@ -1221,61 +1218,11 @@ func (a *app) hevcExtensionInstalled() bool {
 	return a.hevcExt
 }
 
-// pickVideoEncoder is the encoder a transcode uses: the GPU's where one
-// works, which keeps a 4K picture ahead of playback, else x264.
+// pickVideoEncoder is the encoder a transcode uses. It is x264 always: GPU
+// encoders cannot be trusted, since NVENC takes the frame and crashes on
+// Pascal cards with recent drivers, while x264 at 1080p keeps up.
 func (a *app) pickVideoEncoder() string {
-	if a.videoEncoder != "" {
-		return a.videoEncoder
-	}
-	if a.ffmpeg == "" {
-		return ""
-	}
-	// Media Foundation's encoder is left out: it is a software one on most
-	// machines, slower than x264.
-	for _, enc := range []string{"h264_nvenc", "h264_qsv", "h264_amf"} {
-		if a.encoderWorks(enc) {
-			a.videoEncoder = enc
-			a.diag("video encoder: %s", enc)
-			return enc
-		}
-	}
-	a.videoEncoder = "libx264"
-	a.diag("video encoder: libx264")
-	return a.videoEncoder
-}
-
-// encoderWorks runs a one-second encode with the encoder. That ffmpeg was
-// built with it says nothing about the hardware being there or the driver
-// taking it, so it is asked to encode once, with the pixel format each
-// takes: Quick Sync wants nv12, the others yuv420p.
-func (a *app) encoderWorks(enc string) bool {
-	out := filepath.Join(a.dataDir, "tmp", "encoder-"+enc+".mp4")
-	defer os.Remove(out)
-	args := []string{"-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "testsrc=size=256x256:rate=25:duration=1"}
-	if enc == "h264_qsv" {
-		args = append(args, "-pix_fmt", "nv12")
-	} else {
-		args = append(args, "-pix_fmt", "yuv420p")
-	}
-	// Written to a file rather than stdout: a windowed app has no console,
-	// and NVENC crashes on the pipe it would get instead.
-	args = append(args, "-c:v", enc, out)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, a.ffmpeg, args...)
-	executil.Hide(cmd)
-	res, err := cmd.CombinedOutput()
-	if err != nil {
-		a.diag("encoder %s: %v (%s)", enc, err, strings.TrimSpace(string(res)))
-		return false
-	}
-	st, err := os.Stat(out)
-	if err != nil || st.Size() == 0 {
-		a.diag("encoder %s: wrote nothing", enc)
-		return false
-	}
-	return true
+	return "libx264"
 }
 
 // hevcNeedsTranscode says the stream's video is HEVC, which Media Foundation
