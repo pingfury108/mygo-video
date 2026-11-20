@@ -44,7 +44,9 @@ func (a *app) playerPage(c *ui.Context) {
 		a.playReady = true
 		a.diag("ready after %v", time.Since(a.playStarted))
 	}
-	if pl.Ready() && pl.Ended() {
+	// A series goes on to its next episode when one ends. The player reports
+	// Ended late, or never, so the end is read off the clock as well.
+	if pl.Ready() && (pl.Ended() || a.atEnd()) {
 		if !a.ended {
 			a.ended = true
 			a.playNext()
@@ -284,6 +286,19 @@ func (a *app) playLength() time.Duration {
 		return a.player.Duration()
 	}
 	return 0
+}
+
+// atEnd says the playhead reached the end of the video. The player's Ended
+// comes late, or never, as its engine reads the state once, when the first
+// picture shows, so the end is read off the clock instead. Half a second
+// short of it: further back a seek lands, whose landing would count as an
+// end, and further back the watched mark of a video cut early misses.
+func (a *app) atEnd() bool {
+	length := a.playLength()
+	if length <= 0 {
+		return false
+	}
+	return a.playhead() >= length-500*time.Millisecond
 }
 
 // seekTo moves to d, the whole file's time: a remux starts over there.

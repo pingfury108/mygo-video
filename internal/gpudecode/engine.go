@@ -127,10 +127,14 @@ func (e *Engine) runSound() {
 			time.Sleep(5 * time.Millisecond)
 		}
 		// The position is read here, off the window's frame: the call crosses
-		// into WASAPI, and a frame that waited for it would stutter.
-		e.mu.Lock()
-		e.audioPos = e.snd.Position()
-		e.mu.Unlock()
+		// into WASAPI, and a frame that waited for it would stutter. Only while
+		// the device moves: at the end it reports nothing written, and the
+		// playhead would fall back to zero instead of marking the end.
+		if n > 0 {
+			e.mu.Lock()
+			e.audioPos = e.snd.Position()
+			e.mu.Unlock()
+		}
 	}
 }
 
