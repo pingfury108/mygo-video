@@ -66,22 +66,10 @@ async function loadSources() {
 const PER_PAGE = 20;
 const SEARCH_TIMEOUT = 8000;
 
-// What the player plays: the source's own address, with the relay as a
-// template the app's proxy wraps every fetch in — the playlist's relative
-// addresses resolve against the source, and each fetch carries the secret
-// anew.
+// What the player plays: the source's own address, played directly — the
+// same way the web site plays, whose traffic never crosses its server.
 function stream(url) {
-  const server = (host.setting("relayServer") || "").trim().replace(/\/$/, "");
-  const password = (host.setting("relayPassword") || "").trim();
-  if (!server || !password) {
-    return { url, type: url.includes(".m3u8") ? "hls" : "mp4" };
-  }
-  const auth = host.crypto.sha256(password);
-  return {
-    url,
-    type: "hls",
-    relay: server + "/proxy/%s?auth=" + auth,
-  };
+  return { url, type: url.includes(".m3u8") ? "hls" : "mp4" };
 }
 
 // The site's front page: Douban's hot lists. The plugin asks Douban
