@@ -111,6 +111,15 @@ jobs:
         if: matrix.target != 'windows-amd64'
         shell: bash
         run: chmod +x resources/${{ matrix.target }}/bin/*
+      - name: place the dlls the gpu decoder links and loads
+        if: matrix.target == 'windows-amd64'
+        shell: bash
+        run: |
+          # The linker takes the DLLs from the decoder's own directory,
+          # which the checkout lacks; beside the exe they load at runtime.
+          mkdir -p internal/gpudecode/ffmpeg/bin resources/windows-amd64
+          cp resources/windows-amd64/bin/av*.dll resources/windows-amd64/bin/swresample-*.dll internal/gpudecode/ffmpeg/bin/
+          cp resources/windows-amd64/bin/av*.dll resources/windows-amd64/bin/swresample-*.dll resources/windows-amd64/
       - name: check the tool
         shell: bash
         run: |
@@ -121,6 +130,9 @@ jobs:
         env:
           # Signs the update manifests and archives the app reads.
           MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+          # The GPU decoder links libavcodec through cgo, which mygo build
+          # leaves out unless the environment asks for it.
+          CGO_ENABLED: ${{ matrix.target == 'windows-amd64' && '1' || '0' }}
         shell: bash
         run: go tool mygo build -platform ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
