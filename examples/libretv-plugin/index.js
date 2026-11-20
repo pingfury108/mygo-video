@@ -156,12 +156,27 @@ function bestSource(vod) {
   return plain;
 }
 
+// plain strips the HTML a collection site writes its description in: the
+// tags, the spaces it pads with, and the entities it escapes with.
+function plain(html) {
+  return String(html || "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function toVideo(key, vod) {
   return {
     id: encodeId(key, vod.vod_id),
     name: vod.vod_name || String(vod.vod_id),
     poster: vod.vod_pic || "",
-    overview: vod.vod_remarks || "",
+    overview: plain(vod.vod_content) || vod.vod_remarks || "",
   };
 }
 
@@ -239,14 +254,25 @@ export async function title({ id }) {
       id: encodeId(key, vodId),
       name: vod.vod_name || vodId,
       poster: vod.vod_pic || "",
-      overview: vod.vod_content || vod.vod_remarks || "",
+      overview: plain(vod.vod_content) || vod.vod_remarks || "",
     },
     episodes,
   };
 }
 
+// The play of a Douban card goes the same way its title does: the first
+// source that has the title answers with its first episode.
 export async function play({ id }) {
-  const { key, vodId, ep } = decodeId(id);
+  const { key } = decodeId(id);
+  if (key === "douban") {
+    const parts = String(id || "").split("|");
+    const name = decodeURIComponent(parts.slice(2).join("|") || "");
+    if (!name) throw new Error("这个条目没有名字");
+    const sr = await search({ query: name, offset: 0 });
+    if (!sr.videos.length) throw new Error("各源都没有「" + name + "」");
+    return play({ id: sr.videos[0].id + "|0" });
+  }
+  const { vodId, ep } = decodeId(id);
   const source = sourceOf(key);
   if (!source) throw new Error("未知来源 " + key);
   const index = ep === undefined || ep === "" ? 0 : Number(ep);

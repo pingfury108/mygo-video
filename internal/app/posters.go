@@ -3,6 +3,7 @@ package app
 import (
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -21,8 +22,11 @@ func (a *app) posterBitmap(it media.Item) *ui.Bitmap {
 		return nil
 	}
 	if it.Source != "" {
+		// A poster is a picture the plugin hands the app to fetch, which the
+		// stream hosts speak for: collection sites rename their picture
+		// hosts too often for a list of their own.
 		p := a.pluginByID(it.Source)
-		if p == nil || !p.AllowsHost(it.Poster) {
+		if p == nil || !p.AllowsStreamHost(it.Poster) {
 			return nil
 		}
 	}
@@ -39,7 +43,17 @@ func (a *app) posterBitmap(it media.Item) *ui.Bitmap {
 
 func (a *app) loadPoster(raw string) {
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(raw)
+	req, err := http.NewRequest(http.MethodGet, raw, nil)
+	if err != nil {
+		return
+	}
+	// Some picture hosts refuse a request that names no page, as Douban's
+	// answers 418 to one without its own site in the Referer.
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+	if u, e := url.Parse(raw); e == nil {
+		req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		mygo.RunOnMain(func() {
 			delete(a.posterBusy, raw)

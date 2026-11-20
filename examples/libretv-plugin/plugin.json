@@ -21,6 +21,7 @@
   "permissions": {
     "network": [
       "movie.douban.com",
+      "*.doubanio.com",
       "caiji.dyttzyapi.com",
       "cj.rycjapi.com",
       "bfzyapi.com",
