@@ -83,12 +83,14 @@ type Engine struct {
 	clock    time.Time     // when playback began, zero while paused
 	paused   bool
 	rate     float64
-	state    ui.VideoState
-	err      error
-	last     time.Duration // where the picture last shown stood
-	ended    bool
-	stopped  bool
-	skipping bool // the decoder is passing non-reference frames to catch up
+	// syncLoggedAt is when the sync was last written down, once a second.
+	syncLoggedAt time.Time
+	state        ui.VideoState
+	err          error
+	last         time.Duration // where the picture last shown stood
+	ended        bool
+	stopped      bool
+	skipping     bool // the decoder is passing non-reference frames to catch up
 	// audioEndedAt is when the sound ran out, zero while it plays: the
 	// picture goes on by the wall clock from there, for a film whose
 	// closing titles outlast its last sound.
@@ -312,11 +314,25 @@ func (e *Engine) SetWake(wake func()) {
 // finds room for the next sooner.
 func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	// Written once a second, outside the lock: the playhead against where the
+	// picture on screen stands, which is the sync as the window sees it.
+	line := ""
+	defer func() {
+		e.mu.Unlock()
+		if line != "" {
+			syncLog(line)
+		}
+	}()
 	if len(e.queue) == 0 {
 		return e.current, false, e.current.Surface != nil
 	}
 	pos := e.posLocked(t)
+	if t.Sub(e.syncLoggedAt) >= time.Second && e.current.Surface != nil {
+		e.syncLoggedAt = t
+		line = fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms queue=%2d skipped=%v rate=%v ended=%v",
+			pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(),
+			len(e.queue), e.skipping, e.rate, e.ended)
+	}
 	// Drop every picture the playhead passed, keeping the one showing.
 	for len(e.queue) > 1 && e.queue[1].at <= pos {
 		e.queue = e.queue[1:]
@@ -519,6 +535,18 @@ func (e *Engine) Stat(now time.Time) Stats {
 // launch that plays none leaves what it got to.
 func audioLog(msg string) {
 	p := filepath.Join(os.TempDir(), "mygo-audio.log")
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %s\n", time.Now().Format("15:04:05.000"), msg)
+}
+
+// syncLog writes the playhead and the picture's place side by side, so the
+// gap between the sound and the picture can be read after a playback.
+func syncLog(msg string) {
+	p := filepath.Join(os.TempDir(), "mygo-sync.log")
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
