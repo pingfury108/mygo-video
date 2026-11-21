@@ -313,11 +313,10 @@ func (e *Engine) fill() {
 				e.mu.Lock()
 				if len(e.queue) > 0 && !paused {
 					// A picture already due is woken for at once; one that is
-					// not is woken for when the sound still held falls to
-					// what the picture on screen has left of its step — the
-					// same moment Frame shows it at.
+					// not is woken for when the playhead reaches its own time
+					// — the same moment Frame shows it at.
 					wait = 0
-					if due := e.queue[0].at - e.posLocked(time.Now()) - e.sndDelay - e.leadLocked(); due > 0 {
+					if due := e.queue[0].at - e.posLocked(time.Now()); due > 0 {
 						wait = due
 					}
 				}
@@ -480,12 +479,14 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	// guessed: this machine draws a 4K texture every 17ms, so a full
 	// interval of 17ms reached past the delay it was meant to cover, which
 	// the ear still heard as the sound a little late.
-	// The next picture is due when the sound the device still holds falls
-	// to what the picture on screen has left of its step (mpv: time_frame =
-	// buffered_audio - delay, the delay read here off the frame showing
-	// rather than kept by hand). The account settles itself: no constant
-	// guesses how long a present takes, whatever the window's pace.
-	iff := pos + e.sndDelay + e.leadLocked()
+	// The next picture is due when the playhead reaches its own time: its
+	// at is when it should stand on the screen, and the window that asks now
+	// replaces the one showing once that time has come. mpv hands the vo a
+	// future pts and the vo waits for it (video.c:1292, vo.c: vo_is_ready_
+	// for_frame); this window does not wait on a future time, so the sound
+	// the device still holds is not part of the moment at all — adding it
+	// here showed a picture of pos+200ms at pos, a fifth of a second ahead.
+	iff := pos + e.leadLocked()
 	// Drop every picture the playhead passed, keeping the one showing.
 	for len(e.queue) > 1 && e.queue[1].at <= iff {
 		e.queue = e.queue[1:]
