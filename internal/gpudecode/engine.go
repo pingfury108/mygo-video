@@ -85,6 +85,9 @@ type Engine struct {
 	// audioAt is when the device last reported, which the playhead is
 	// carried from by the wall clock: the report is whole periods apart.
 	audioAt time.Time
+	// seeking is set from a seek until the sound's thread has made it: the
+	// device still reports the place it played before until then.
+	seeking bool
 	clock   time.Time // when playback began, zero while paused
 	paused  bool
 	rate    float64
@@ -182,6 +185,9 @@ func (e *Engine) runSound() {
 		// drawing for as long as it took.
 		if seekReq != nil {
 			e.snd.Seek(*seekReq)
+			e.mu.Lock()
+			e.seeking = false
+			e.mu.Unlock()
 			continue
 		}
 		if paused {
@@ -210,7 +216,7 @@ func (e *Engine) runSound() {
 			// Not once the playback is paused: the place it stopped at is the
 			// last the device reported, and a read that lands after the pause
 			// would move the picture on past where it stands.
-			if !e.paused {
+			if !e.paused && !e.seeking {
 				// The device reports whole periods, a little behind the
 				// sound each time: taking it as it comes would step the
 				// playhead back by up to a period on every report, and the
@@ -698,6 +704,7 @@ func (e *Engine) Pause() {
 // Seek goes to d, restarting the decoder and the sound there.
 func (e *Engine) Seek(d time.Duration) {
 	e.mu.Lock()
+	src, snd := e.src, e.snd
 	e.queue = nil
 	e.at = d
 	e.base = d
@@ -707,9 +714,12 @@ func (e *Engine) Seek(d time.Duration) {
 	e.state = ui.VideoLoading
 	e.audioPos = 0
 	e.audioAt = time.Time{}
+	// Until the sound's own thread has sought, the device still reports the
+	// place it played before: a read of it landing here would put that place
+	// back, and the picture would go with it.
+	e.seeking = snd != nil
 	e.audioEndedAt = time.Time{}
 	e.current = ui.VideoPicture{}
-	src, snd := e.src, e.snd
 	if snd != nil {
 		e.sndSeek = &d
 	}
