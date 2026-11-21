@@ -94,6 +94,9 @@ type Engine struct {
 	// sndSeek is a seek for the thread that owns the device to make: the
 	// call reads the source and must not hold the window.
 	sndSeek *time.Duration
+	// seekSeq numbers the seeks: a drag sends many, and only the last is
+	// worth the decoder's while, as mpv merges its seeks.
+	seekSeq int64
 	// syncLoggedAt is when the sync was last written down, once a second.
 	syncLoggedAt time.Time
 	// frameAt and frameStep are when the window last asked for a picture and
@@ -732,12 +735,29 @@ func (e *Engine) Seek(d time.Duration) {
 	if snd != nil {
 		e.sndSeek = &d
 	}
+	// A drag sends many seeks and each ran on a goroutine of its own, so
+	// the decoder was sought in whatever order they took its lock: it could
+	// end on an old place while the engine stood on the newest, every picture
+	// decoded past was dropped for belonging to a place no longer asked for,
+	// and the picture froze for good — a pause or a play moves nothing.
+	// mpv merges seeks (the deferring in mpctx->seek); this one numbers them
+	// and only the last runs.
+	e.seekSeq++
+	seq := e.seekSeq
 	e.mu.Unlock()
 	if src != nil {
 		go func() {
+			e.mu.Lock()
+			latest := e.seekSeq
+			e.mu.Unlock()
+			if seq != latest {
+				return
+			}
 			_ = src.Seek(d)
 			e.mu.Lock()
-			e.state = ui.VideoReady
+			if e.seekSeq == seq {
+				e.state = ui.VideoReady
+			}
 			e.mu.Unlock()
 		}()
 	}
