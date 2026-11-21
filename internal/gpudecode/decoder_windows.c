@@ -22,6 +22,7 @@ static FILE *declog(void) {
 #include <libavutil/hwcontext_d3d11va.h>
 #include <libavutil/pixfmt.h>
 #include <libavformat/avio.h>
+#include <libavutil/time.h>
 #include "bgra_windows.c"
 
 // Dec is a decoder reading one video, its pictures on the GPU where the
@@ -38,6 +39,7 @@ typedef struct {
 	int              lastIndex; // its slice in the array
 	Conv             conv;      // NV12 to BGRA, on the GPU
 	int              convReady;
+	int              readErrs;  // reads in a row that failed
 	CRITICAL_SECTION cs;        // a seek and a decode must not mix
 } Dec;
 
@@ -78,6 +80,7 @@ static int dec_open(Dec *d, const char *url, const char *headers) {
 	av_dict_set(&opts, "buffer_size", "524288", 0);
 	av_dict_set(&opts, "reconnect_streamed", "1", 0);
 	av_dict_set(&opts, "reconnect_delay_max", "4", 0);
+	av_dict_set(&opts, "rw_timeout", "15000000", 0);
 	int r = avformat_open_input(&d->fmt, url, NULL, &opts);
 	av_dict_free(&opts);
 	if (r < 0) {
@@ -144,10 +147,25 @@ static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
 			LeaveCriticalSection(&d->cs);
 			return -20;
 		}
-		if (av_read_frame(d->fmt, d->pkt) < 0) {
+		int rr = av_read_frame(d->fmt, d->pkt);
+		if (rr < 0 && rr != AVERROR_EOF) {
+			// A read that failed partway is not the end of the video: a
+			// source that stalls is tried again with the section open, so a
+			// seek during the stall does not wait for it.
+			if (++d->readErrs > 200) {
+				LeaveCriticalSection(&d->cs);
+				return -30;
+			}
+			LeaveCriticalSection(&d->cs);
+			av_usleep(20000);
+			EnterCriticalSection(&d->cs);
+			continue;
+		}
+		if (rr < 0) {
 			avcodec_send_packet(d->dec, NULL);
 			continue;
 		}
+		d->readErrs = 0;
 		if (d->pkt->stream_index == d->stream) {
 			avcodec_send_packet(d->dec, d->pkt);
 		}

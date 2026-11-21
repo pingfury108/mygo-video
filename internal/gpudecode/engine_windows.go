@@ -5,6 +5,7 @@ package gpudecode
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -13,13 +14,21 @@ import (
 // winFrames adapts the Direct3D 11 decoder to the engine's frames.
 // winFrames hands the engine pictures from the decoder, each with how far
 // ahead of where the seek or the start put us it shows: the picture's own
-// PTS turned into time, which a variable frame rate needs.
+// PTS turned into time, which a variable frame rate needs. A generation
+// counts the seeks, so a picture decoded for a place the playback has left
+// is dropped rather than measured against the new one.
 type winFrames struct {
+	mu     sync.Mutex
 	d      *Decoder
 	anchor *int64 // the PTS the offsets count from, in microseconds
+	gen    int64
 }
 
 func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
+	w.mu.Lock()
+	gen, anchor := w.gen, w.anchor
+	w.mu.Unlock()
+
 	f, err := w.d.Next()
 	if err != nil {
 		return ui.VideoPicture{}, 0, err
@@ -36,18 +45,29 @@ func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
 	// showing the picture of the one played before.
 	off := time.Duration(0)
 	tb := w.d.Timebase()
+	w.mu.Lock()
+	if w.gen != gen {
+		// A seek came while this one decoded: its place belongs to where the
+		// playback no longer is, and its PTS must not anchor the new place.
+		w.mu.Unlock()
+		return ui.VideoPicture{}, 0, errStale
+	}
 	if tb > 0 {
 		ptsUs := int64(float64(f.PTS) * tb * 1e6)
-		if w.anchor == nil {
+		if anchor == nil {
 			w.anchor = &ptsUs
 		}
 		off = time.Duration(ptsUs-*w.anchor) * time.Microsecond
 	}
+	w.mu.Unlock()
 	return ui.NewTexturePicture(handle, uint64(handle), bw, bh), off, nil
 }
 
 func (w *winFrames) Seek(d time.Duration) error {
+	w.mu.Lock()
+	w.gen++
 	w.anchor = nil
+	w.mu.Unlock()
 	return w.d.Seek(d)
 }
 

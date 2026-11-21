@@ -8,6 +8,7 @@
 #include <libavcodec/avcodec.h>
 #include <libswresample/swresample.h>
 #include <libavutil/opt.h>
+#include <libavutil/time.h>
 #include <stdio.h>
 
 // The device and client interfaces, whose identifiers mingw does not carry.
@@ -34,6 +35,7 @@ typedef struct {
 	HANDLE              event;
 	int                 started;
 	int                 eof;    // the sound of the file is over
+	int                 readErrs; // reads in a row that failed
 
 	// pcm is what swr made of the audio frame last decoded, and left of it
 	// how many frames are yet to play.
@@ -64,6 +66,7 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	av_dict_set(&opts, "buffer_size", "524288", 0);
 	av_dict_set(&opts, "reconnect_streamed", "1", 0);
 	av_dict_set(&opts, "reconnect_delay_max", "4", 0);
+	av_dict_set(&opts, "rw_timeout", "15000000", 0);
 	if (avformat_open_input(&a->fmt, url, NULL, &opts) < 0) return -1;
 	av_dict_free(&opts);
 	if (avformat_find_stream_info(a->fmt, NULL) < 0) return -2;
@@ -164,10 +167,23 @@ static int audio_decode(Audio *a) {
 			return 0;
 		}
 		if (r != AVERROR(EAGAIN)) return -23;
-		if (av_read_frame(a->fmt, a->pkt) < 0) {
+		int rr = av_read_frame(a->fmt, a->pkt);
+		if (rr < 0 && rr != AVERROR_EOF) {
+			// A read that failed partway is not the end of the sound: a
+			// source that stalls is tried again, and only a run of failed
+			// reads gives up, where the picture may then outlast it.
+			if (++a->readErrs > 200) {
+				a->eof = 1;
+				return 0;
+			}
+			av_usleep(20000);
+			return -100; // nothing this time, try again later
+		}
+		if (rr < 0) {
 			avcodec_send_packet(a->dec, NULL);
 			continue;
 		}
+		a->readErrs = 0;
 		if (a->pkt->stream_index == a->stream) {
 			avcodec_send_packet(a->dec, a->pkt);
 		}
@@ -189,6 +205,11 @@ static int audio_fill(Audio *a) {
 		if (a->pcmAt >= a->pcmFrames) {
 			int n = audio_decode(a);
 			if (n == 0) break;
+			if (n == -100) {
+				// The source stalled: give back what was written and let the
+				// loop come round again, rather than ending the sound.
+				break;
+			}
 			if (n < 0) {
 				a->render->lpVtbl->ReleaseBuffer(a->render, done, 0);
 				return n;

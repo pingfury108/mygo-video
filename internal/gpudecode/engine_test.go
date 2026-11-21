@@ -386,3 +386,31 @@ func TestPictureOutlastsTheSound(t *testing.T) {
 	}
 	t.Logf("sound ended at %v, picture went on to %v", at.Video, s.Video)
 }
+
+// TestShownGapStaysWithinAStep is the measurement mpv uses: where the picture
+// and the sound stood when the picture went up, read together. A gap inside
+// one picture's step is the picture waiting for its moment, not a drift.
+func TestShownGapStaysWithinAStep(t *testing.T) {
+	step := 40 * time.Millisecond
+	src := &fakeFrames{step: step}
+	snd := &fakeClock{rate: 1}
+	e := newEngine(src, snd)
+	defer e.Close()
+	e.Play()
+
+	worst := time.Duration(0)
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		e.Frame(time.Now())
+		if v, a, ok := e.Sync(); ok {
+			if g := v - a; g < worst {
+				worst = g
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if worst < -step {
+		t.Fatalf("the shown picture stood %v behind the sound, past its own %v step", worst, step)
+	}
+	t.Logf("worst shown gap %v, one step is %v", worst, step)
+}

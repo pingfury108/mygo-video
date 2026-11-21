@@ -20,6 +20,11 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// errStale says a picture was decoded for a place the playback has since
+// left: a seek came while it was decoding, and its place would be measured
+// against the new one, which puts it seconds away from where it belongs.
+var errStale = errors.New("gpudecode: stale picture")
+
 // frames is what decodes the pictures, one after another. Next hands over
 // the picture and how long after where the seek or the start put us it
 // shows — its own PTS in time, which a variable frame rate needs.
@@ -88,6 +93,11 @@ type Engine struct {
 	// picture goes on by the wall clock from there, for a film whose
 	// closing titles outlast its last sound.
 	audioEndedAt time.Time
+
+	// shownVideo and shownAudio are where the picture and the sound stood
+	// when the picture now showing went up, read together.
+	shownVideo, shownAudio time.Duration
+	shown                  bool
 }
 
 // queued is a picture and where it shows.
@@ -214,6 +224,11 @@ func (e *Engine) fill() {
 		}
 
 		pic, off, err := src.Next()
+		if errors.Is(err, errStale) {
+			// A seek came while this one decoded: its place belongs to where
+			// the playback no longer is.
+			continue
+		}
 		if errors.Is(err, io.EOF) {
 			e.mu.Lock()
 			e.ended = true
@@ -299,6 +314,7 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 		changed := e.current.Surface != e.queue[0].pic.Surface
 		e.current = e.queue[0].pic
 		e.last = e.queue[0].at
+		e.shownVideo, e.shownAudio, e.shown = e.last, pos, true
 		if len(e.queue) > 1 {
 			e.queue = e.queue[1:]
 		}
@@ -307,9 +323,20 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	if e.current.Surface == nil {
 		e.current = e.queue[0].pic
 		e.last = e.queue[0].at
+		e.shownVideo, e.shownAudio, e.shown = e.last, pos, true
 		return e.current, true, true
 	}
 	return e.current, false, true
+}
+
+// Sync reports where the picture and the sound stood when the picture now
+// showing was put up, read together as mpv reads them when it compares the
+// two. A gap within a picture's own step is the picture waiting for its
+// moment, which is not a drift.
+func (e *Engine) Sync() (video, audio time.Duration, ok bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.shownVideo, e.shownAudio, e.shown
 }
 
 // posAt is where the playhead stands: the sound's position, which is the
