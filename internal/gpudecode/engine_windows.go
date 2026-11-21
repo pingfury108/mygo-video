@@ -99,6 +99,7 @@ func (w winFrames) Step() time.Duration {
 type winAudio struct{ a *Audio }
 
 func (w winAudio) Position() time.Duration  { return w.a.Position() }
+func (w winAudio) Delay() time.Duration     { return w.a.Delay() }
 func (w winAudio) Seek(d time.Duration) int { return w.a.Seek(d) }
 func (w winAudio) Fill() int                { return w.a.Fill() }
 func (w winAudio) Play()                    { w.a.Play() }
