@@ -9,27 +9,38 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// fakeFrames hands out pictures at a step, after a delay each.
+// fakeFrames hands out pictures at a step, after a delay each. Offsets may
+// follow a table of their own, for a video whose frames are not evenly
+// spaced.
 type fakeFrames struct {
-	mu    sync.Mutex
-	step  time.Duration
-	slow  time.Duration
-	n     int
-	ended bool
+	mu      sync.Mutex
+	step    time.Duration
+	slow    time.Duration
+	offsets []time.Duration
+	n       int
+	ended   bool
 }
 
-func (f *fakeFrames) Next() (ui.VideoPicture, error) {
+func (f *fakeFrames) Next() (ui.VideoPicture, time.Duration, error) {
 	if f.slow > 0 {
 		time.Sleep(f.slow)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.ended {
-		return ui.VideoPicture{}, io.EOF
+		return ui.VideoPicture{}, 0, io.EOF
+	}
+	off := time.Duration(f.n) * f.step
+	if f.offsets != nil {
+		if f.n < len(f.offsets) {
+			off = f.offsets[f.n]
+		} else {
+			off = f.offsets[len(f.offsets)-1] + time.Duration(f.n-len(f.offsets)+1)*f.step
+		}
 	}
 	f.n++
 	pix := make([]byte, 4)
-	return ui.NewPixelsPicture(pix, 1, 1), nil
+	return ui.NewPixelsPicture(pix, 1, 1), off, nil
 }
 
 func (f *fakeFrames) Seek(d time.Duration) error { return nil }
@@ -197,4 +208,73 @@ func TestCloseWithSources(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("Close waited for threads that never ended")
 	}
+}
+
+// TestVFRShowsOnItsOwnTimeline is what a variable frame rate caught wrong
+// before: the frames were timed by counting them at the average rate, and a
+// video whose frames are uneven drifted away from the sound. On its own
+// offsets each picture shows when its offset comes due, however uneven
+// they are.
+func TestVFRShowsOnItsOwnTimeline(t *testing.T) {
+	offsets := []time.Duration{0, 40 * time.Millisecond, 240 * time.Millisecond, 280 * time.Millisecond, 560 * time.Millisecond}
+	src := &fakeFrames{
+		step:    20 * time.Millisecond,
+		offsets: offsets,
+	}
+	snd := &fakeClock{rate: 1}
+	e := newEngine(src, snd)
+	defer e.Close()
+	e.Play()
+
+	// When each picture first shows, in the sound's time: a picture whose
+	// offset says 240ms has to turn up around there, not a count of frames
+	// later.
+	shown := map[time.Duration]time.Duration{}
+	last := time.Duration(-1)
+	deadline := time.Now().Add(900 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		now := time.Now()
+		e.Frame(now)
+		s := e.Stat(now)
+		if s.Video != last {
+			if _, ok := shown[s.Video]; !ok && last >= 0 {
+				shown[s.Video] = s.Audio
+			}
+			last = s.Video
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, off := range offsets[1:] {
+		at, ok := shown[off]
+		if !ok {
+			t.Fatalf("the picture at %v never showed", off)
+		}
+		if d := at - off; d < -100*time.Millisecond || d > 200*time.Millisecond {
+			t.Fatalf("the picture at %v turned up %v into the sound", off, d)
+		}
+	}
+}
+
+// TestQueueKeepsAboutASecond is the depth that keeps the picture playing
+// while the sound does on a slow source: as deep as the sound's buffer.
+func TestQueueKeepsAboutASecond(t *testing.T) {
+	src := &fakeFrames{step: 40 * time.Millisecond} // 25fps: a second is 25
+	snd := &fakeClock{rate: 1}
+	e := newEngine(src, snd)
+	defer e.Close()
+	e.Play()
+
+	deadline := time.Now().Add(800 * time.Millisecond)
+	max := 0
+	for time.Now().Before(deadline) {
+		e.Frame(time.Now())
+		time.Sleep(10 * time.Millisecond)
+		if q := e.Stat(time.Now()).Queue; q > max {
+			max = q
+		}
+	}
+	if max < 20 {
+		t.Fatalf("queue held %d pictures, want about a second of them", max)
+	}
+	t.Logf("queue peaked at %d pictures (25 is a second)", max)
 }

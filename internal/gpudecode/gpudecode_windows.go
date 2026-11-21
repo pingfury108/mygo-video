@@ -119,6 +119,10 @@ func (p *Decoder) Picture() (uintptr, int, int, error) {
 // FPS is the video's nominal rate.
 func (p *Decoder) FPS() float64 { return float64(C.dec_fps(&p.d)) }
 
+// Timebase is the stream's time base, in seconds a tick: a picture's PTS
+// becomes seconds when multiplied by it.
+func (p *Decoder) Timebase() float64 { return float64(C.dec_tb(&p.d)) }
+
 // Duration is how long the video is.
 func (p *Decoder) Duration() time.Duration {
 	return time.Duration(int64(C.dec_duration_us(&p.d))) * time.Microsecond

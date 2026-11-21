@@ -20,13 +20,13 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// ahead is how many pictures the decoder keeps ready before the playhead.
-const ahead = 12 // pictures kept ready, about half a second of video
-
-// frames is what decodes the pictures, one after another.
+// frames is what decodes the pictures, one after another. Next hands over
+// the picture and how long after where the seek or the start put us it
+// shows — its own PTS in time, which a variable frame rate needs.
 type frames interface {
-	// Next decodes the next picture, or reports io.EOF after the last.
-	Next() (ui.VideoPicture, error)
+	// Next decodes the next picture, or reports io.EOF after the last, with
+	// how long after where the seek or the start put us it shows.
+	Next() (ui.VideoPicture, time.Duration, error)
 	// Seek goes to d and decodes from there.
 	Seek(d time.Duration) error
 	// Step is how long a picture of it shows.
@@ -63,7 +63,6 @@ type Engine struct {
 	wake    func()
 	queue   []queued
 	current ui.VideoPicture
-	seq     int64
 	base    time.Duration
 
 	at       time.Duration // where the playhead stood when playback began
@@ -152,22 +151,34 @@ func (e *Engine) fill() {
 			e.mu.Unlock()
 			return
 		}
-		if len(e.queue) >= ahead || e.paused || e.src == nil {
-			wake := e.wake
-			e.mu.Unlock()
+		src, paused, queueLen, wake := e.src, e.paused, len(e.queue), e.wake
+		e.mu.Unlock()
+		// Keep about a second of video ready, as deep as the sound's buffer:
+		// a shallower queue makes the picture stall before the sound does on
+		// a slow source, and the two come apart.
+		step := 40 * time.Millisecond
+		if src != nil {
+			if d := src.Step(); d > 0 {
+				step = d
+			}
+		}
+		ahead := int((1100 * time.Millisecond) / step)
+		if ahead < 12 {
+			ahead = 12
+		}
+		if queueLen >= ahead || paused || src == nil {
 			if wake != nil {
 				wake()
 				// A window woken faster than the video has frames redraws the same
 				// picture over and over, and the work crowds the frame it waits for.
-				time.Sleep(e.stepOf() / 2)
+				time.Sleep(step / 2)
 			} else {
 				time.Sleep(50 * time.Millisecond)
 			}
 			continue
 		}
-		e.mu.Unlock()
 
-		pic, err := e.src.Next()
+		pic, off, err := src.Next()
 		if errors.Is(err, io.EOF) {
 			e.mu.Lock()
 			e.ended = true
@@ -182,15 +193,13 @@ func (e *Engine) fill() {
 			e.mu.Unlock()
 			return
 		}
-		step := e.src.Step()
 		e.mu.Lock()
-		e.queue = append(e.queue, queued{at: e.base + time.Duration(e.seq)*step, pic: pic})
-		e.seq++
+		e.queue = append(e.queue, queued{at: e.base + off, pic: pic})
 		e.state = ui.VideoReady
-		wake := e.wake
+		wk := e.wake
 		e.mu.Unlock()
-		if wake != nil {
-			wake()
+		if wk != nil {
+			wk()
 		}
 	}
 }
@@ -309,7 +318,6 @@ func (e *Engine) Seek(d time.Duration) {
 	e.queue = nil
 	e.at = d
 	e.base = d
-	e.seq = 0
 	e.last = d
 	e.clock = time.Now()
 	e.ended = false

@@ -11,30 +11,48 @@ import (
 )
 
 // winFrames adapts the Direct3D 11 decoder to the engine's frames.
-type winFrames struct{ d *Decoder }
+// winFrames hands the engine pictures from the decoder, each with how far
+// ahead of where the seek or the start put us it shows: the picture's own
+// PTS turned into time, which a variable frame rate needs.
+type winFrames struct {
+	d      *Decoder
+	anchor *int64 // the PTS the offsets count from, in microseconds
+}
 
-func (w winFrames) Next() (ui.VideoPicture, error) {
+func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
 	f, err := w.d.Next()
 	if err != nil {
-		return ui.VideoPicture{}, err
+		return ui.VideoPicture{}, 0, err
 	}
 	if !f.OnGPU {
-		return ui.VideoPicture{}, errors.New("gpudecode: picture not on the GPU")
+		return ui.VideoPicture{}, 0, errors.New("gpudecode: picture not on the GPU")
 	}
 	handle, bw, bh, err := w.d.Picture()
 	if err != nil {
-		return ui.VideoPicture{}, err
+		return ui.VideoPicture{}, 0, err
 	}
 	// The handle is the key the renderer caches the opened texture by: two
 	// videos make different textures, and a key of one number would keep
 	// showing the picture of the one played before.
-	return ui.NewTexturePicture(handle, uint64(handle), bw, bh), nil
+	off := time.Duration(0)
+	tb := w.d.Timebase()
+	if tb > 0 {
+		ptsUs := int64(float64(f.PTS) * tb * 1e6)
+		if w.anchor == nil {
+			w.anchor = &ptsUs
+		}
+		off = time.Duration(ptsUs-*w.anchor) * time.Microsecond
+	}
+	return ui.NewTexturePicture(handle, uint64(handle), bw, bh), off, nil
 }
 
-func (w winFrames) Seek(d time.Duration) error { return w.d.Seek(d) }
-func (w winFrames) Duration() time.Duration    { return w.d.Duration() }
-func (w winFrames) Size() (int, int)           { return w.d.Size() }
-func (w winFrames) Close() error               { return w.d.Close() }
+func (w *winFrames) Seek(d time.Duration) error {
+	w.anchor = nil
+	return w.d.Seek(d)
+}
+func (w winFrames) Duration() time.Duration { return w.d.Duration() }
+func (w winFrames) Size() (int, int)        { return w.d.Size() }
+func (w winFrames) Close() error            { return w.d.Close() }
 func (w winFrames) Step() time.Duration {
 	if f := w.d.FPS(); f > 0 {
 		return time.Duration(float64(time.Second) / f)
@@ -94,7 +112,7 @@ func (e *Engine) open(url string, headers []string) {
 		audioLog("audio: " + aerr.Error())
 	}
 	e.mu.Lock()
-	e.src = winFrames{d}
+	e.src = &winFrames{d: d}
 	e.snd = snd
 	wake := e.wake
 	e.mu.Unlock()

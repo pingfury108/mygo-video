@@ -38,6 +38,7 @@ typedef struct {
 	int              lastIndex; // its slice in the array
 	Conv             conv;      // NV12 to BGRA, on the GPU
 	int              convReady;
+	CRITICAL_SECTION cs;        // a seek and a decode must not mix
 } Dec;
 
 // pick_d3d11 asks for Direct3D 11 pictures, and the system's own memory
@@ -57,6 +58,7 @@ static void dec_free(Dec *d) {
 	if (d->dec) avcodec_free_context(&d->dec);
 	if (d->hw) av_buffer_unref(&d->hw);
 	if (d->fmt) avformat_close_input(&d->fmt);
+	DeleteCriticalSection(&d->cs);
 	memset(d, 0, sizeof(*d));
 }
 
@@ -67,6 +69,7 @@ static int dec_open(Dec *d, const char *url, const char *headers) {
 	int ni = avformat_network_init();
 	DLOG("network_init=%d protocol=%s\n", ni, avio_find_protocol_name("http://x") ? avio_find_protocol_name("http://x") : "(null)");
 	memset(d, 0, sizeof(*d));
+	InitializeCriticalSection(&d->cs);
 	AVDictionary *opts = NULL;
 	if (headers && headers[0]) av_dict_set(&opts, "headers", headers, 0);
 	int r = avformat_open_input(&d->fmt, url, NULL, &opts);
@@ -105,6 +108,10 @@ static int dec_open(Dec *d, const char *url, const char *headers) {
 // with its texture and index, 2 for one in memory, 0 at the end, and a
 // negative step number that failed.
 static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
+	// The whole read-decode loop takes the section: a seek from the other
+	// thread must wait for the picture in hand, and the next one waits for
+	// the seek, or the two would mix state in one context.
+	EnterCriticalSection(&d->cs);
 	for (;;) {
 		int r = avcodec_receive_frame(d->dec, d->frame);
 		if (r == 0) {
@@ -115,14 +122,22 @@ static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
 				*index = (int)(intptr_t)d->frame->data[1];
 				d->lastTex = *tex;
 				d->lastIndex = *index;
+				LeaveCriticalSection(&d->cs);
 				return 1;
 			}
 			*tex = NULL;
 			*index = -1;
+			LeaveCriticalSection(&d->cs);
 			return 2;
 		}
-		if (r == AVERROR_EOF) return 0;
-		if (r != AVERROR(EAGAIN)) return -20;
+		if (r == AVERROR_EOF) {
+			LeaveCriticalSection(&d->cs);
+			return 0;
+		}
+		if (r != AVERROR(EAGAIN)) {
+			LeaveCriticalSection(&d->cs);
+			return -20;
+		}
 		if (av_read_frame(d->fmt, d->pkt) < 0) {
 			avcodec_send_packet(d->dec, NULL);
 			continue;
@@ -132,6 +147,12 @@ static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
 		}
 		av_packet_unref(d->pkt);
 	}
+}
+
+// dec_tb is the stream's time base, in seconds a tick.
+static double dec_tb(Dec *d) {
+	if (!d->fmt || d->stream < 0) return 0;
+	return av_q2d(d->fmt->streams[d->stream]->time_base);
 }
 
 static int dec_width(Dec *d)  { return d->par ? d->par->width : 0; }
@@ -176,12 +197,20 @@ static int64_t dec_duration_us(Dec *d) {
 
 // dec_seek_us goes to the picture at us, in microseconds.
 static int dec_seek_us(Dec *d, int64_t us) {
-	if (!d->fmt || d->stream < 0) return -1;
+	EnterCriticalSection(&d->cs);
+	if (!d->fmt || d->stream < 0) {
+		LeaveCriticalSection(&d->cs);
+		return -1;
+	}
 	AVStream *st = d->fmt->streams[d->stream];
 	int64_t ts = av_rescale_q(us, AV_TIME_BASE_Q, st->time_base);
 	int r = av_seek_frame(d->fmt, d->stream, ts, AVSEEK_FLAG_BACKWARD);
-	if (r < 0) return r;
+	if (r < 0) {
+		LeaveCriticalSection(&d->cs);
+		return r;
+	}
 	if (d->dec) avcodec_flush_buffers(d->dec);
 	d->lastTex = NULL;
+	LeaveCriticalSection(&d->cs);
 	return 0;
 }
