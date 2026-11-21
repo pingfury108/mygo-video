@@ -220,11 +220,6 @@ const (
 	// beats catching up frame by frame.
 	lagSkip = 600 * time.Millisecond
 	lagJump = 2500 * time.Millisecond
-
-	// videoLead is how far ahead of the sound's clock a picture is handed
-	// over: the window puts it up at its next draw, a frame or two later.
-	// Zero while the clock is being measured: a lead hides the reading.
-	videoLead = 0 * time.Millisecond
 )
 
 // fill keeps the queue stocked and the decoder's skip on the beat of the
@@ -391,7 +386,19 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	// The picture goes up a frame or two after the engine hands it over, at
 	// the window's next draw, so the one due now is the one for a little
 	// further on: without it the picture trails the sound by that draw.
-	iff := pos + videoLead
+	// lead is how far ahead of the clock a picture is handed over: the
+	// window takes the picture it draws at its next frame, which is one of
+	// its own intervals away, and a picture due exactly now would go up
+	// that much after its time. Measured, not guessed: the window's frame
+	// interval is 21ms here, and 40ms of a guess overshot it.
+	lead := e.frameStep
+	if lead <= 0 {
+		lead = 16 * time.Millisecond
+	}
+	if lead > 50*time.Millisecond {
+		lead = 50 * time.Millisecond
+	}
+	iff := pos + lead
 	// Drop every picture the playhead passed, keeping the one showing.
 	for len(e.queue) > 1 && e.queue[1].at <= iff {
 		e.queue = e.queue[1:]
@@ -424,7 +431,7 @@ func (e *Engine) syncLine(pos time.Duration) string {
 		q0, qn = e.queue[0].at, e.queue[len(e.queue)-1].at
 	}
 	return fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms lead=%v ui=%v queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
-		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(), videoLead,
+		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(), e.frameStep.Round(time.Millisecond),
 		e.frameStep.Round(time.Millisecond), len(e.queue),
 		q0.String(), qn.String(), e.skipping, e.rate, e.ended)
 }
