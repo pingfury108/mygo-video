@@ -268,10 +268,28 @@ func (e *Engine) fill() {
 		}
 		if queueLen >= ahead || paused || src == nil {
 			if wake != nil {
+				// Woken when the picture on top of the queue is due, not
+				// every half step: woken sooner, the window draws the same
+				// picture again at a moment of its own, and the pictures
+				// reach the screen at times that jump about — 23ms, 42ms,
+				// 64ms between them where a 25fps film steps every 40 —
+				// which is heard as the picture running with the sound and
+				// against it by turns.
+				wait := step / 2
+				e.mu.Lock()
+				if len(e.queue) > 0 && !paused {
+					// A picture already due is woken for at once; one that is
+					// not is woken for when it comes due, less the lead.
+					wait = 0
+					if due := e.queue[0].at - e.posLocked(time.Now()) - e.leadLocked(); due > 0 {
+						wait = due
+					}
+				}
+				e.mu.Unlock()
+				if wait > 0 {
+					time.Sleep(wait)
+				}
 				wake()
-				// A window woken faster than the video has frames redraws the same
-				// picture over and over, and the work crowds the frame it waits for.
-				time.Sleep(step / 2)
 			} else {
 				time.Sleep(50 * time.Millisecond)
 			}
@@ -415,24 +433,11 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	// guessed: this machine draws a 4K texture every 17ms, so a full
 	// interval of 17ms reached past the delay it was meant to cover, which
 	// the ear still heard as the sound a little late.
-	// lead is how far ahead of the clock a picture is handed over: the
-	// window draws at its own frames, the picture waits for one of them, and
-	// the drawing reaches the screen a little later still, through the
-	// texture and the compositor. Seven tenths of a window frame is what this
-	// playback needed: half of one was short, the whole of one was long, and
-	// the answer fell between them.
-	lead := e.frameStep * 7 / 10
-	if lead <= 0 {
-		lead = 12 * time.Millisecond
-	}
-	if lead > 25*time.Millisecond {
-		lead = 25 * time.Millisecond
-	}
-	// avOffset is what the picture is moved against the sound by, read from
-	// a file for a machine whose delay belongs to its output rather than to
-	// this engine: adjusted on the spot, as mpv's --audio-delay is.
-	lead += e.avOffset()
-	iff := pos + lead
+	// The picture goes up a frame or two after the engine hands it over, at
+	// the window's next draw and its present; the wake below is timed so that
+	// present lands on the picture's moment, and the lead is what that wait
+	// takes: half of a 60Hz refresh.
+	iff := pos + e.leadLocked()
 	// Drop every picture the playhead passed, keeping the one showing.
 	for len(e.queue) > 1 && e.queue[1].at <= iff {
 		e.queue = e.queue[1:]
@@ -518,6 +523,14 @@ func (e *Engine) tracing() bool {
 	return e.traceOn
 }
 
+// leadLocked is how far ahead of the clock a picture is handed over: the
+// window needs that long from being woken to the present reaching the screen,
+// which is half a refresh at 60Hz, plus whatever this machine's output adds,
+// which the listener sets.
+func (e *Engine) leadLocked() time.Duration {
+	return 8*time.Millisecond + e.avOffset()
+}
+
 // syncLine reports the playhead against the picture the screen now shows,
 // read after that picture was chosen: a line made before it compared this
 // moment's playhead with the last one's picture, and showed a gap of its own.
@@ -528,7 +541,7 @@ func (e *Engine) syncLine(pos time.Duration) string {
 	}
 	return fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms lead=%v+%v ui=%v queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
 		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(),
-		(e.frameStep / 2).Round(time.Millisecond), e.avShift, e.frameStep.Round(time.Millisecond), len(e.queue),
+		8*time.Millisecond, e.avShift, e.frameStep.Round(time.Millisecond), len(e.queue),
 		q0.String(), qn.String(), e.skipping, e.rate, e.ended)
 }
 
