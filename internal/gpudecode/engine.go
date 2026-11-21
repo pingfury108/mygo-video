@@ -279,7 +279,7 @@ func (e *Engine) fill() {
 			e.mu.Unlock()
 			return
 		}
-		src, paused, queueLen, wake := e.src, e.paused, len(e.queue), e.wake
+		src, paused, queueLen := e.src, e.paused, len(e.queue)
 		e.mu.Unlock()
 		// Keep about a second of video ready, as deep as the sound's buffer:
 		// a shallower queue makes the picture stall before the sound does on
