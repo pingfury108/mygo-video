@@ -82,9 +82,12 @@ type Engine struct {
 
 	at       time.Duration // where the playhead stood when playback began
 	audioPos time.Duration // where the sound stood, read off the frame
-	clock    time.Time     // when playback began, zero while paused
-	paused   bool
-	rate     float64
+	// audioAt is when the device last reported, which the playhead is
+	// carried from by the wall clock: the report is whole periods apart.
+	audioAt time.Time
+	clock   time.Time // when playback began, zero while paused
+	paused  bool
+	rate    float64
 	// sndSeek is a seek for the thread that owns the device to make: the
 	// call reads the source and must not hold the window.
 	sndSeek *time.Duration
@@ -208,7 +211,21 @@ func (e *Engine) runSound() {
 			// last the device reported, and a read that lands after the pause
 			// would move the picture on past where it stands.
 			if !e.paused {
-				e.audioPos = p
+				// The device reports whole periods, a little behind the
+				// sound each time: taking it as it comes would step the
+				// playhead back by up to a period on every report, and the
+				// picture would step with it. The playhead only moves on
+				// from where it is, and takes the report when the two have
+				// drifted apart for good.
+				now := time.Now()
+				predicted := e.audioPos
+				if !e.audioAt.IsZero() {
+					predicted += time.Duration(float64(now.Sub(e.audioAt)) * e.rate)
+				}
+				if p > predicted || predicted-p > 60*time.Millisecond {
+					e.audioPos = p
+				}
+				e.audioAt = now
 			}
 			e.mu.Unlock()
 		}
@@ -574,6 +591,15 @@ func (e *Engine) posLocked(t time.Time) time.Duration {
 	// Before the device moves, its position is 0: the picture waits there
 	// for it, rather than running ahead on the wall clock.
 	if e.audioEndedAt.IsZero() {
+		// The device reports whole periods — 20ms on this machine — so its
+		// position jumps where the sound runs evenly, and a picture chosen
+		// off a jumping clock jumps with it. The report is a point the
+		// playhead passes through, and the wall clock carries it from there
+		// until the device reports again, as mpv reads the sound's delay
+		// once and then sleeps the time it has left.
+		if !e.audioAt.IsZero() {
+			pos += time.Duration(float64(t.Sub(e.audioAt)) * e.rate)
+		}
 		return pos
 	}
 	// The sound is over, the picture is not: it goes on by the wall clock,
@@ -624,6 +650,9 @@ func (e *Engine) Play() {
 	defer e.mu.Unlock()
 	if e.clock.IsZero() || e.paused {
 		e.clock = time.Now()
+		// The device carried on from where the pause left it, and the
+		// wall clock carries the playhead from here, not from the pause.
+		e.audioAt = time.Now()
 	}
 	e.paused = false
 }
@@ -662,6 +691,7 @@ func (e *Engine) Seek(d time.Duration) {
 	e.ended = false
 	e.state = ui.VideoLoading
 	e.audioPos = 0
+	e.audioAt = time.Time{}
 	e.audioEndedAt = time.Time{}
 	e.current = ui.VideoPicture{}
 	src, snd := e.src, e.snd
