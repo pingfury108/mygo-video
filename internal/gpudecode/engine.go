@@ -165,10 +165,8 @@ func (e *Engine) runSound() {
 	lockSoundThread()
 	// The sound waits for the picture to have something to show: started
 	// first, it ran through the first frames of the film while the decoder
-	// was still filling up, and a playback began half a second apart. The
-	// first pictures of a 4K film take longer than a second to decode, so the
-	// wait is a generous one: a decoder that fails gives up on its own.
-	for i := 0; i < 300; i++ {
+	// was still filling up, and a playback began a third of a second apart.
+	for i := 0; i < 100; i++ {
 		e.mu.Lock()
 		n, stopped := len(e.queue), e.stopped
 		e.mu.Unlock()
