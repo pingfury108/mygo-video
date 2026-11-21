@@ -247,6 +247,14 @@ func (e *Engine) fill() {
 			return
 		}
 		e.mu.Lock()
+		// A seek lands before the place asked for, and the pictures of that
+		// place belong to where the playhead no longer is: they are decoded
+		// past, not shown, so the picture starts where the seek asked for, as
+		// the sound does.
+		if off < 0 {
+			e.mu.Unlock()
+			continue
+		}
 		// The playhead ran past everything ready by a wide margin: a jump
 		// stands on the newest picture now, rather than flashing through
 		// every one of the ones it passed.

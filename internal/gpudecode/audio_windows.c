@@ -36,6 +36,10 @@ typedef struct {
 	int                 started;
 	int                 eof;    // the sound of the file is over
 	int                 readErrs; // reads in a row that failed
+	// startUs is the place the sound was sought to: the frames of earlier
+	// places are dropped, as a seek lands before the one asked for.
+	int64_t             startUs;
+	AVRational          tb;     // the stream's time base, for those frames
 
 	// pcm is what swr made of the audio frame last decoded, and left of it
 	// how many frames are yet to play.
@@ -175,6 +179,7 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	if (FAILED(a->client->lpVtbl->GetBufferSize(a->client, &a->chunk))) return -17;
 	if (FAILED(a->client->lpVtbl->GetService(a->client, &IID_RENDER,
 		(void **)&a->render))) return -18;
+	a->tb = a->fmt->streams[a->stream]->time_base;
 	if (startUs > 0) audio_seek(a, startUs);
 	audio_line("audio_open: device ready");
 	return 0;
@@ -186,6 +191,17 @@ static int audio_decode(Audio *a) {
 	for (;;) {
 		int r = avcodec_receive_frame(a->dec, a->frame);
 		if (r == 0) {
+			// A seek lands on the frame the index holds before the place
+			// asked for, and the sound of the ones before it belongs to where
+			// the playhead no longer is: playing it would run the sound ahead
+			// of the picture by the length of what came first.
+			if (a->startUs > 0 && a->frame->pts != AV_NOPTS_VALUE && a->tb.num > 0) {
+				int64_t ptsUs = av_rescale_q(a->frame->pts, a->tb, AV_TIME_BASE_Q);
+				if (ptsUs < a->startUs) {
+					av_frame_unref(a->frame);
+					continue;
+				}
+			}
 			int cap = swr_get_out_samples(a->swr,
 				a->frame->nb_samples + (a->frame->nb_samples % 100));
 			if (cap <= 0) cap = a->frame->nb_samples * 2 + 256;
@@ -329,6 +345,8 @@ static int audio_seek(Audio *a, int64_t us) {
 	audio_apartment();
 	if (!a->fmt || a->stream < 0) return -30;
 	AVStream *st = a->fmt->streams[a->stream];
+	a->tb = st->time_base;
+	a->startUs = us;
 	int64_t ts = av_rescale_q(us, AV_TIME_BASE_Q, st->time_base);
 	if (av_seek_frame(a->fmt, a->stream, ts, AVSEEK_FLAG_BACKWARD) < 0) return -31;
 	if (a->dec) avcodec_flush_buffers(a->dec);

@@ -21,6 +21,7 @@ type winFrames struct {
 	mu     sync.Mutex
 	d      *Decoder
 	anchor *int64 // the PTS the offsets count from, in microseconds
+	seekUs int64  // where the last seek put the playhead, in microseconds
 	gen    int64
 }
 
@@ -57,10 +58,18 @@ func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
 	}
 	if tb > 0 {
 		ptsUs := int64(float64(f.PTS) * tb * 1e6)
-		if anchor == nil {
-			w.anchor = &ptsUs
+		if w.seekUs > 0 {
+			// A seek landed on the picture the index holds before the place
+			// asked for: one before it shows before its time, and the engine
+			// passes those over, so both the picture and the sound start
+			// from the place the seek asked for.
+			off = time.Duration(ptsUs-w.seekUs) * time.Microsecond
+		} else {
+			if anchor == nil {
+				w.anchor = &ptsUs
+			}
+			off = time.Duration(ptsUs-*w.anchor) * time.Microsecond
 		}
-		off = time.Duration(ptsUs-*w.anchor) * time.Microsecond
 	}
 	w.mu.Unlock()
 	return ui.NewTexturePicture(handle, uint64(handle), bw, bh), off, nil
@@ -70,6 +79,7 @@ func (w *winFrames) Seek(d time.Duration) error {
 	w.mu.Lock()
 	w.gen++
 	w.anchor = nil
+	w.seekUs = d.Microseconds()
 	w.mu.Unlock()
 	return w.d.Seek(d)
 }
