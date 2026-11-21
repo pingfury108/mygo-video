@@ -67,6 +67,20 @@ static void audio_co_init(void) {
 // elsewhere reaches it from a thread that has none.
 static __thread int t_apartment = 0;
 
+// audio_line writes a line for the log of the sound, for the steps that come
+// before the device exists and so have nothing to trace yet. The app has no
+// console: the file is the only place it can be read.
+static void audio_line(const char *msg) {
+	const char *tmp = getenv("TEMP");
+	if (!tmp) return;
+	char path[512];
+	snprintf(path, sizeof(path), "%s\\mygo-audio-c.log", tmp);
+	FILE *f = fopen(path, "a");
+	if (!f) return;
+	fprintf(f, "%s\n", msg);
+	fclose(f);
+}
+
 static void audio_apartment(void) {
 	if (!t_apartment) {
 		CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -87,13 +101,16 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	av_dict_set(&opts, "reconnect_streamed", "1", 0);
 	av_dict_set(&opts, "reconnect_delay_max", "4", 0);
 	av_dict_set(&opts, "rw_timeout", "15000000", 0);
+	audio_line("audio_open: open input");
 	if (avformat_open_input(&a->fmt, url, NULL, &opts) < 0) return -1;
 	av_dict_free(&opts);
+	audio_line("audio_open: input opened");
 	if (avformat_find_stream_info(a->fmt, NULL) < 0) return -2;
 	a->stream = av_find_best_stream(a->fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
 	if (a->stream < 0) return -3;
+	if (avcodec_find_decoder(a->fmt->streams[a->stream]->codecpar->codec_id) == NULL) return -4;
 	const AVCodec *codec = avcodec_find_decoder(a->fmt->streams[a->stream]->codecpar->codec_id);
-	if (!codec) return -4;
+	audio_line("audio_open: codec found");
 	a->dec = avcodec_alloc_context3(codec);
 	if (!a->dec) return -5;
 	if (avcodec_parameters_to_context(a->dec, a->fmt->streams[a->stream]->codecpar) < 0) return -6;
@@ -103,9 +120,11 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	if (!a->pkt || !a->frame) return -8;
 
 	HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	audio_line("audio_open: COM apartment");
 	if (FAILED(hr)) return -900 - (int)(hr & 0xFF);
 	IMMDeviceEnumerator *enumr = NULL;
 	hr = CoCreateInstance(&CLSID_ENUM, NULL, CLSCTX_ALL, &IID_ENUM, (void **)&enumr);
+	audio_line("audio_open: device enumerator");
 	if (FAILED(hr)) return -1000 - (int)(hr & 0xFF);
 	IMMDevice *dev = NULL;
 	if (FAILED(enumr->lpVtbl->GetDefaultAudioEndpoint(enumr, eRender, eConsole, &dev))) {
@@ -119,6 +138,7 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 		return -12;
 	}
 	dev->lpVtbl->Release(dev);
+	audio_line("audio_open: client activated");
 	WAVEFORMATEX *fmt = NULL;
 	if (FAILED(a->client->lpVtbl->GetMixFormat(a->client, &fmt))) return -13;
 	a->rate = fmt->nSamplesPerSec;
@@ -145,6 +165,7 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	if (swr_init(a->swr) < 0) return -15;
 
 	REFERENCE_TIME dur = 10000000LL * 4 / 10; // 400ms of buffer
+	audio_line("audio_open: initializing device");
 	if (FAILED(a->client->lpVtbl->Initialize(a->client, AUDCLNT_SHAREMODE_SHARED,
 		AUDCLNT_STREAMFLAGS_NOPERSIST, dur, 0, fmt, NULL))) {
 		CoTaskMemFree(fmt);
@@ -155,6 +176,7 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	if (FAILED(a->client->lpVtbl->GetService(a->client, &IID_RENDER,
 		(void **)&a->render))) return -18;
 	if (startUs > 0) audio_seek(a, startUs);
+	audio_line("audio_open: device ready");
 	return 0;
 }
 

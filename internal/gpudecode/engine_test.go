@@ -414,3 +414,30 @@ func TestShownGapStaysWithinAStep(t *testing.T) {
 	}
 	t.Logf("worst shown gap %v, one step is %v", worst, step)
 }
+
+// TestPositionAnswersWhilePlaying is the call the app makes every frame to draw
+// the progress bar: it must answer, and answer while the window draws frames,
+// which a playhead read under a lock it also takes would never do.
+func TestPositionAnswersWhilePlaying(t *testing.T) {
+	src := &fakeFrames{step: 40 * time.Millisecond}
+	snd := &fakeClock{rate: 1}
+	e := newEngine(src, snd)
+	defer e.Close()
+	e.Play()
+	time.Sleep(100 * time.Millisecond)
+
+	done := make(chan time.Duration, 1)
+	go func() {
+		e.Frame(time.Now())
+		done <- e.Position()
+	}()
+	select {
+	case pos := <-done:
+		if pos <= 0 {
+			t.Fatalf("position %v after 100ms of playback", pos)
+		}
+		t.Logf("position %v", pos)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Position never answered: a lock taken twice")
+	}
+}

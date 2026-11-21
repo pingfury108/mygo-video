@@ -342,16 +342,9 @@ func (e *Engine) Sync() (video, audio time.Duration, ok bool) {
 	return e.shownVideo, e.shownAudio, e.shown
 }
 
-// posAt is where the playhead stands: the sound's position, which is the
-// clock, even before it moves. The wall clock only stands in where no sound
-// plays, as a video without a track.
-func (e *Engine) posAt(t time.Time) time.Duration {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.posLocked(t)
-}
-
-// posLocked is posAt for a thread that already holds the lock.
+// posLocked is where the playhead stands, for a thread that holds the lock:
+// the sound's position, which is the clock, even before it moves. The wall
+// clock only stands in where no sound plays, as a video without a track.
 func (e *Engine) posLocked(t time.Time) time.Duration {
 	pos := e.at
 	if e.paused {
@@ -401,7 +394,7 @@ func (e *Engine) Duration() time.Duration {
 func (e *Engine) Position() time.Duration {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.posAt(time.Now())
+	return e.posLocked(time.Now())
 }
 
 // Play starts or resumes the video.

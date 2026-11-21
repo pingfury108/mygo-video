@@ -127,13 +127,16 @@ func (e *Engine) open(url string, headers []string) {
 	startAt := e.at
 	e.mu.Unlock()
 	if startAt > 0 {
+		audioLog(fmt.Sprintf("video seek to %v", startAt))
 		if err := d.Seek(startAt); err != nil {
 			audioLog("video seek: " + err.Error())
 		}
 	}
+	audioLog("audio opening")
 	var snd clock
 	if a, aerr := openAudio(url, headers, startAt); aerr == nil {
 		snd = winAudio{a}
+		audioLog("audio made")
 	} else {
 		audioLog("audio: " + aerr.Error())
 	}
@@ -142,6 +145,7 @@ func (e *Engine) open(url string, headers []string) {
 	e.snd = snd
 	wake := e.wake
 	e.mu.Unlock()
+	audioLog("open done")
 	if wake != nil {
 		wake()
 	}
