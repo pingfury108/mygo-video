@@ -9,9 +9,19 @@ import "C"
 
 import (
 	"fmt"
+	"runtime"
 	"time"
 	"unsafe"
 )
+
+// lockSoundThread pins the sound's thread and gives it a COM apartment of its
+// own. A goroutine moves between system threads, and CoInitializeEx belongs to
+// the thread that called it: a sound device made on one thread and filled from
+// another reached WASAPI from a thread with no apartment, and hung there.
+func lockSoundThread() {
+	runtime.LockOSThread()
+	C.audio_co_init()
+}
 
 // Audio plays the sound of a video with WASAPI.
 type Audio struct {

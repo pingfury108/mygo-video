@@ -54,6 +54,26 @@ static void audio_trace(Audio *a, const char *what, int n);
 // audio_seek is declared below, before audio_open runs it.
 static int audio_seek(Audio *a, int64_t us);
 
+// audio_co_init gives the calling thread a COM apartment. A device made on one
+// thread and filled from another reaches WASAPI from a thread that has none,
+// which hangs there rather than failing: the sound's own thread calls this.
+static void audio_co_init(void) {
+	CoInitializeEx(NULL, COINIT_MULTITHREADED);
+}
+
+// A goroutine moves between system threads, and every call into WASAPI must
+// come from a thread with an apartment. This marks each thread the first time
+// it makes one, so neither the loop that fills the device nor a seek from
+// elsewhere reaches it from a thread that has none.
+static __thread int t_apartment = 0;
+
+static void audio_apartment(void) {
+	if (!t_apartment) {
+		CoInitializeEx(NULL, COINIT_MULTITHREADED);
+		t_apartment = 1;
+	}
+}
+
 static int audio_open(Audio *a, const char *url, const char *headers, int64_t startUs,
                       int *outRate, int *outChannels) {
 	memset(a, 0, sizeof(*a));
@@ -194,6 +214,7 @@ static int audio_decode(Audio *a) {
 // audio_fill writes what the device will play next into its buffer, and says
 // how many frames it wrote; 0 when the sound is over.
 static int audio_fill(Audio *a) {
+	audio_apartment();
 	UINT32 pad = 0;
 	if (FAILED(a->client->lpVtbl->GetCurrentPadding(a->client, &pad))) return -24;
 	UINT32 want = a->chunk - pad;
@@ -230,6 +251,7 @@ static int audio_fill(Audio *a) {
 
 // audio_play starts the device.
 static int audio_play(Audio *a) {
+	audio_apartment();
 	if (a->started) {
 		a->client->lpVtbl->Start(a->client);
 		return 0;
@@ -244,12 +266,14 @@ static int audio_play(Audio *a) {
 }
 
 static void audio_pause(Audio *a) {
+	audio_apartment();
 	if (a->started) a->client->lpVtbl->Stop(a->client);
 }
 
 // audio_position is how far the device has played, in microseconds: what was
 // written, less what it still holds.
 static int64_t audio_position(Audio *a) {
+	audio_apartment();
 	if (!a->started) return 0;
 	UINT32 pad = 0;
 	if (FAILED(a->client->lpVtbl->GetCurrentPadding(a->client, &pad))) return 0;
@@ -263,6 +287,7 @@ static int64_t audio_position(Audio *a) {
 static int audio_ended(Audio *a) { return a->eof; }
 
 static void audio_close(Audio *a) {
+	audio_apartment();
 	if (a->client) a->client->lpVtbl->Stop(a->client);
 	if (a->render) a->render->lpVtbl->Release(a->render);
 	if (a->client) a->client->lpVtbl->Release(a->client);
@@ -279,6 +304,7 @@ static void audio_close(Audio *a) {
 // audio_seek goes to us in the sound, and empties what the device holds, so
 // the sound follows the picture there rather than playing from the start.
 static int audio_seek(Audio *a, int64_t us) {
+	audio_apartment();
 	if (!a->fmt || a->stream < 0) return -30;
 	AVStream *st = a->fmt->streams[a->stream];
 	int64_t ts = av_rescale_q(us, AV_TIME_BASE_Q, st->time_base);

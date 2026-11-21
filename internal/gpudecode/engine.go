@@ -128,6 +128,9 @@ func (e *Engine) runSound() {
 			audioLog(fmt.Sprintf("sound panic: %v", r))
 		}
 	}()
+	// The sound's calls reach WASAPI, whose apartment belongs to a thread:
+	// the thread is pinned and given one of its own here.
+	lockSoundThread()
 	e.snd.Play()
 	for {
 		e.mu.Lock()

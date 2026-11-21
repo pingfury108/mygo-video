@@ -43,6 +43,18 @@ func main() {
 			seekEvery = n
 		}
 	}
+	// BUSY spreads the goroutines over more system threads, as the app's own
+	// do: a sound device reaches WASAPI from whichever thread runs it.
+	if n, err := strconv.Atoi(os.Getenv("BUSY")); err == nil && n > 0 {
+		for i := 0; i < n; i++ {
+			go func() {
+				for {
+					time.Sleep(200 * time.Microsecond)
+				}
+			}()
+		}
+		fmt.Printf("busy: %d goroutines\n", n)
+	}
 	e, err := gpudecode.NewEngine(url, nil)
 	if err != nil {
 		fmt.Println("open failed:", err)
