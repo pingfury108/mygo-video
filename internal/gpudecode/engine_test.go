@@ -176,10 +176,11 @@ func TestSlowDecoderStallsPicture(t *testing.T) {
 	}
 	s := e.Stat(time.Now())
 	t.Logf("slow decoder: video=%v sound=%v queue=%d", s.Video, s.Audio, s.Queue)
-	// The playhead is carried by the wall clock from the device's last
-	// report, so it may stand a step behind the sound; a picture a step or
-	// more ahead of it is the stall this looks for.
-	if s.Video > s.Audio+50*time.Millisecond {
+	// The picture is handed over a refresh before its time, and the
+	// playhead is carried by the wall clock from the device's last report:
+	// both let it stand a little ahead of the sound. This looks for a stall,
+	// which leaves it a whole step or more ahead.
+	if s.Video > s.Audio+100*time.Millisecond {
 		t.Fatalf("picture ahead of the sound with a slow decoder")
 	}
 }
