@@ -106,11 +106,8 @@ type Engine struct {
 	avReadAt time.Time
 	avFixed  bool // set by SetAVOffset, which the file no longer overrides
 	// step is how long a picture of the video shows, kept from the decoder
-	// for the account of the pictures the window holds.
-	step time.Duration
-	// lead is that account, and sndDelay the sound the device still holds:
-	// the next picture is due when the two are equal, as mpv's delay is.
-	lead     time.Duration
+	// for the lead a shown picture holds the screen for.
+	step     time.Duration
 	sndDelay time.Duration
 	// traceOn says a file asks for every picture to be written down, and
 	// traceAt when that was last checked; traceLast is the last written.
@@ -311,10 +308,10 @@ func (e *Engine) fill() {
 				if len(e.queue) > 0 && !paused {
 					// A picture already due is woken for at once; one that is
 					// not is woken for when the sound still held falls to
-					// what the pictures already handed over account for — the
+					// what the picture on screen has left of its step — the
 					// same moment Frame shows it at.
 					wait = 0
-					if due := e.queue[0].at - e.posLocked(time.Now()) - e.sndDelay - e.lead; due > 0 {
+					if due := e.queue[0].at - e.posLocked(time.Now()) - e.sndDelay - e.leadLocked(); due > 0 {
 						wait = due
 					}
 				}
@@ -442,7 +439,7 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 				e.traceLast = e.last
 				fresh = "new"
 			}
-			pictureLine = fmt.Sprintf("%s picture %.3f pos %.3f lead %v delay %v", fresh, e.last.Seconds(), pos.Seconds(), e.lead.Milliseconds(), e.sndDelay.Milliseconds())
+			pictureLine = fmt.Sprintf("%s picture %.3f pos %.3f left %v delay %v", fresh, e.last.Seconds(), pos.Seconds(), e.leadLocked().Milliseconds(), e.sndDelay.Milliseconds())
 		}
 		e.mu.Unlock()
 		if line != "" {
@@ -477,14 +474,12 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	// guessed: this machine draws a 4K texture every 17ms, so a full
 	// interval of 17ms reached past the delay it was meant to cover, which
 	// the ear still heard as the sound a little late.
-	// mpv holds a running account of where the picture stands against the
-	// sound (mpctx->delay): a picture shown raises it by its step, time spent
-	// showing lowers it. The next picture is due when the account runs out of
-	// the sound the device still holds — video.c: time_frame =
-	// buffered_audio - delay — for what the screen is behind by is exactly
-	// what the device is still to play. No constant guesses how long a
-	// present takes: the account is the answer, and it settles itself.
-	iff := pos + e.sndDelay - e.lead
+	// The next picture is due when the sound the device still holds falls
+	// to what the picture on screen has left of its step (mpv: time_frame =
+	// buffered_audio - delay, the delay read here off the frame showing
+	// rather than kept by hand). The account settles itself: no constant
+	// guesses how long a present takes, whatever the window's pace.
+	iff := pos + e.sndDelay + e.leadLocked()
 	// Drop every picture the playhead passed, keeping the one showing.
 	for len(e.queue) > 1 && e.queue[1].at <= iff {
 		e.queue = e.queue[1:]
@@ -493,13 +488,6 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 		changed := e.current.Surface != e.queue[0].pic.Surface
 		e.current = e.queue[0].pic
 		e.last = e.queue[0].at
-		// The picture just shown raises the account by its step, as a frame
-		// shown raises mpv's delay; time lowers it again below.
-		step := e.step
-		if step <= 0 {
-			step = 40 * time.Millisecond
-		}
-		e.lead += step
 		e.shownVideo, e.shownAudio, e.shown = e.last, pos, true
 		if len(e.queue) > 1 {
 			e.queue = e.queue[1:]
@@ -509,17 +497,11 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	if e.current.Surface == nil {
 		e.current = e.queue[0].pic
 		e.last = e.queue[0].at
-		e.lead = 0
 		e.shownVideo, e.shownAudio, e.shown = e.last, pos, true
 		return e.current, true, true
 	}
-	// No picture is due: the one showing has been on since e.last, and the
-	// time it has spent there is time the account has been spent, as a frame
-	// shown lowers mpv's delay by its time.
-	e.lead -= pos - e.last
-	if e.lead < 0 {
-		e.lead = 0
-	}
+	// No picture is due: the one showing stands until its step is spent,
+	// and leadLocked reads what is left of it off the clock.
 	return e.current, false, true
 }
 
@@ -585,11 +567,24 @@ func (e *Engine) tracing() bool {
 	return e.traceOn
 }
 
-// avLocked is how far the picture is moved against the sound, as a player's
-// audio delay is: the machine's output may hold one of them back, and only
-// the listener can say by how much.
-func (e *Engine) avLocked() time.Duration {
-	return e.avOffset()
+// leadLocked is what a shown picture holds the screen for, less what the
+// device will play of the sound while it does: the account the next picture
+// is due against, which is mpv's delay at the moment a frame is shown
+// (video.c: delay -= frame_time before the next is looked for). The window
+// asks at its own pace, so the account is read off the frame showing, not
+// kept by hand across calls: it cannot drift.
+func (e *Engine) leadLocked() time.Duration {
+	step := e.step
+	if step <= 0 {
+		step = 40 * time.Millisecond
+	}
+	if pos := e.posLocked(time.Now()); pos > e.last {
+		if left := step - (pos - e.last); left > 0 {
+			return left
+		}
+		return 0
+	}
+	return 0
 }
 
 // syncLine reports the playhead against the picture the screen now shows,
@@ -600,9 +595,9 @@ func (e *Engine) syncLine(pos time.Duration) string {
 	if len(e.queue) > 0 {
 		q0, qn = e.queue[0].at, e.queue[len(e.queue)-1].at
 	}
-	return fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms lead=%v+%v ui=%v queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
+	return fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms left=%v delay=%v ui=%v queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
 		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(),
-		16*time.Millisecond, e.avShift, e.frameStep.Round(time.Millisecond), len(e.queue),
+		e.leadLocked(), e.sndDelay, e.frameStep.Round(time.Millisecond), len(e.queue),
 		q0.String(), qn.String(), e.skipping, e.rate, e.ended)
 }
 
