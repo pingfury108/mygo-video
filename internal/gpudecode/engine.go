@@ -109,6 +109,12 @@ type Engine struct {
 	// for the lead a shown picture holds the screen for.
 	step     time.Duration
 	sndDelay time.Duration
+	// syncErr is the correction mpv's adjust_sync keeps: a tenth of the
+	// error between the picture and the playhead, taken each quarter second
+	// and bounded by a quarter step, so a clock that runs a little off is
+	// followed without ever being jumped.
+	syncErr   time.Duration
+	syncErrAt time.Time
 	// traceOn says a file asks for every picture to be written down, and
 	// traceAt when that was last checked; traceLast is the last written.
 	traceOn   bool
@@ -578,13 +584,41 @@ func (e *Engine) leadLocked() time.Duration {
 	if step <= 0 {
 		step = 40 * time.Millisecond
 	}
-	if pos := e.posLocked(time.Now()); pos > e.last {
-		if left := step - (pos - e.last); left > 0 {
-			return left
-		}
+	// mpv corrects the account it keeps against where the sound really is:
+	// every frame it shows, the playhead the device reports is compared with
+	// the frame's own time, and a tenth of the difference goes onto the
+	// account (video.c: adjust_sync, change = av_delay * 0.1). Without it a
+	// clock that lies a little lies forever, and the picture stands by it.
+	now := time.Now()
+	pos := e.posLocked(now)
+	if e.syncErrAt.IsZero() {
+		e.syncErrAt = now
 		return 0
 	}
-	return 0
+	if d := now.Sub(e.syncErrAt); d >= 250*time.Millisecond {
+		// How far the picture on screen stands from the playhead, which is
+		// the error to correct; a tenth of it, as mpv takes.
+		err := (e.last - pos) / 10
+		lim := step / 4
+		if err > lim {
+			err = lim
+		}
+		if err < -lim {
+			err = -lim
+		}
+		e.syncErr += err
+		e.syncErrAt = now
+		if e.syncErr > 2*time.Second || e.syncErr < -2*time.Second {
+			syncLog(fmt.Sprintf("DESYNC picture=%.3f pos=%.3f corr=%.3f", e.last.Seconds(), pos.Seconds(), e.syncErr.Seconds()))
+		}
+	}
+	if pos > e.last {
+		if left := step - (pos - e.last); left > 0 {
+			return left + e.syncErr
+		}
+		return e.syncErr
+	}
+	return e.syncErr
 }
 
 // syncLine reports the playhead against the picture the screen now shows,
@@ -731,6 +765,10 @@ func (e *Engine) Seek(d time.Duration) {
 	e.state = ui.VideoLoading
 	e.audioPos = 0
 	e.audioAt = time.Time{}
+	// A new place starts the correction over: the old place's error is not
+	// this one's.
+	e.syncErr = 0
+	e.syncErrAt = time.Time{}
 	e.audioEndedAt = time.Time{}
 	e.current = ui.VideoPicture{}
 	src, snd := e.src, e.snd
