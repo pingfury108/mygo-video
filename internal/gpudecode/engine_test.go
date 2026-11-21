@@ -88,6 +88,9 @@ func (c *fakeClock) Seek(d time.Duration) int {
 }
 
 func (c *fakeClock) Fill() int { return 1 }
+
+// Delay is the buffer a real device would hold: two steps of it.
+func (c *fakeClock) Delay() time.Duration { return 80 * time.Millisecond }
 func (c *fakeClock) Play() {
 	c.mu.Lock()
 	if c.start.IsZero() {

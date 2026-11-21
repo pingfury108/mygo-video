@@ -62,6 +62,11 @@ func (p *Audio) Position() time.Duration {
 	return time.Duration(int64(C.audio_position(&p.a))) * time.Microsecond
 }
 
+// Delay is how long the sound it holds will take to play.
+func (p *Audio) Delay() time.Duration {
+	return time.Duration(int64(C.audio_delay_us(&p.a))) * time.Microsecond
+}
+
 // Close releases the device.
 func (p *Audio) Close() {
 	if p.closed {

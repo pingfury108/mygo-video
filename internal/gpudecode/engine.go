@@ -54,6 +54,9 @@ type frames interface {
 type clock interface {
 	// Position is how far it has played.
 	Position() time.Duration
+	// Delay is how long the sound it holds will take to play, which is
+	// how far the picture on screen may lead the sound's own moment.
+	Delay() time.Duration
 	// Seek moves it to d, emptying what the device holds.
 	Seek(d time.Duration) int
 	// Fill writes what the device plays next, and reports how many frames it
@@ -103,8 +106,12 @@ type Engine struct {
 	avReadAt time.Time
 	avFixed  bool // set by SetAVOffset, which the file no longer overrides
 	// step is how long a picture of the video shows, kept from the decoder
-	// for the lead a picture is handed over with.
+	// for the account of the pictures the window holds.
 	step time.Duration
+	// lead is that account, and sndDelay the sound the device still holds:
+	// the next picture is due when the two are equal, as mpv's delay is.
+	lead     time.Duration
+	sndDelay time.Duration
 	// traceOn says a file asks for every picture to be written down, and
 	// traceAt when that was last checked; traceLast is the last written.
 	traceOn   bool
@@ -209,6 +216,7 @@ func (e *Engine) runSound() {
 			// switched, would otherwise hold the engine with it, and the
 			// window would stop drawing frames.
 			p := e.snd.Position()
+			d := e.snd.Delay()
 			e.mu.Lock()
 			// Not once the playback is paused: the place it stopped at is the
 			// last the device reported, and a read that lands after the pause
@@ -229,6 +237,9 @@ func (e *Engine) runSound() {
 					e.audioPos = p
 				}
 				e.audioAt = now
+				// The sound the device holds is what the pictures already
+				// handed over stand against.
+				e.sndDelay = d
 			}
 			e.mu.Unlock()
 		}
@@ -299,9 +310,11 @@ func (e *Engine) fill() {
 				e.mu.Lock()
 				if len(e.queue) > 0 && !paused {
 					// A picture already due is woken for at once; one that is
-					// not is woken for when it comes due, less the lead.
+					// not is woken for when the sound still held falls to
+					// what the pictures already handed over account for — the
+					// same moment Frame shows it at.
 					wait = 0
-					if due := e.queue[0].at - e.posLocked(time.Now()) - e.leadLocked(); due > 0 {
+					if due := e.queue[0].at - e.posLocked(time.Now()) - e.sndDelay - e.lead; due > 0 {
 						wait = due
 					}
 				}
@@ -429,7 +442,7 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 				e.traceLast = e.last
 				fresh = "new"
 			}
-			pictureLine = fmt.Sprintf("%s picture %.3f pos %.3f lead %v", fresh, e.last.Seconds(), pos.Seconds(), e.leadLocked().Milliseconds())
+			pictureLine = fmt.Sprintf("%s picture %.3f pos %.3f lead %v delay %v", fresh, e.last.Seconds(), pos.Seconds(), e.lead.Milliseconds(), e.sndDelay.Milliseconds())
 		}
 		e.mu.Unlock()
 		if line != "" {
@@ -464,11 +477,14 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	// guessed: this machine draws a 4K texture every 17ms, so a full
 	// interval of 17ms reached past the delay it was meant to cover, which
 	// the ear still heard as the sound a little late.
-	// The picture goes up a frame or two after the engine hands it over, at
-	// the window's next draw and its present; the wake below is timed so that
-	// present lands on the picture's moment, and the lead is what that wait
-	// takes: half of a 60Hz refresh.
-	iff := pos + e.leadLocked()
+	// mpv holds a running account of where the picture stands against the
+	// sound (mpctx->delay): a picture shown raises it by its step, time spent
+	// showing lowers it. The next picture is due when the account runs out of
+	// the sound the device still holds — video.c: time_frame =
+	// buffered_audio - delay — for what the screen is behind by is exactly
+	// what the device is still to play. No constant guesses how long a
+	// present takes: the account is the answer, and it settles itself.
+	iff := pos + e.sndDelay - e.lead
 	// Drop every picture the playhead passed, keeping the one showing.
 	for len(e.queue) > 1 && e.queue[1].at <= iff {
 		e.queue = e.queue[1:]
@@ -477,6 +493,13 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 		changed := e.current.Surface != e.queue[0].pic.Surface
 		e.current = e.queue[0].pic
 		e.last = e.queue[0].at
+		// The picture just shown raises the account by its step, as a frame
+		// shown raises mpv's delay; time lowers it again below.
+		step := e.step
+		if step <= 0 {
+			step = 40 * time.Millisecond
+		}
+		e.lead += step
 		e.shownVideo, e.shownAudio, e.shown = e.last, pos, true
 		if len(e.queue) > 1 {
 			e.queue = e.queue[1:]
@@ -486,8 +509,16 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	if e.current.Surface == nil {
 		e.current = e.queue[0].pic
 		e.last = e.queue[0].at
+		e.lead = 0
 		e.shownVideo, e.shownAudio, e.shown = e.last, pos, true
 		return e.current, true, true
+	}
+	// No picture is due: the one showing has been on since e.last, and the
+	// time it has spent there is time the account has been spent, as a frame
+	// shown lowers mpv's delay by its time.
+	e.lead -= pos - e.last
+	if e.lead < 0 {
+		e.lead = 0
 	}
 	return e.current, false, true
 }
@@ -554,20 +585,11 @@ func (e *Engine) tracing() bool {
 	return e.traceOn
 }
 
-// leadLocked is how far ahead of the clock a picture is handed over, and it
-// has two parts. One is the wait from handing it over to it being seen: the
-// window draws it and the present takes a refresh, 16ms at 60Hz. The other is
-// what choosing among pictures costs: they stand a step apart, and the one
-// picked for a moment is on average half a step early — but the window asks
-// every 31ms here, nearer the step than a half of it, so a full half step
-// held the gap at zero and was heard a little slow. A quarter of a step is
-// what this machine's playback answered to.
-func (e *Engine) leadLocked() time.Duration {
-	step := e.step
-	if step <= 0 {
-		step = 40 * time.Millisecond
-	}
-	return 16*time.Millisecond + step/4 + e.avOffset()
+// avLocked is how far the picture is moved against the sound, as a player's
+// audio delay is: the machine's output may hold one of them back, and only
+// the listener can say by how much.
+func (e *Engine) avLocked() time.Duration {
+	return e.avOffset()
 }
 
 // syncLine reports the playhead against the picture the screen now shows,

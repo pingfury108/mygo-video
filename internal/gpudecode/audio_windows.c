@@ -426,6 +426,18 @@ static int64_t audio_position(Audio *a) {
 	return (int64_t)(played * 1000000ULL / (UINT64)a->rate);
 }
 
+// audio_delay is how long the sound held in the device will take to play, in
+// microseconds: what was written and not yet played. mpv keeps a running
+// account of it (ao->delay: audio written raises it, a picture shown lowers
+// it); this reads the same thing off the device, one call, no drift.
+static int64_t audio_delay_us(Audio *a) {
+	audio_apartment();
+	UINT32 pad = 0;
+	if (!a->started || FAILED(a->client->lpVtbl->GetCurrentPadding(a->client, &pad)))
+		return 0;
+	return (int64_t)pad * 1000000 / (UINT32)a->rate;
+}
+
 // audio_ended says the sound of the file is over, which the picture may
 // outlast: a film whose closing titles run past its last sound is the usual
 // case, and one where the picture would freeze at the last of it.
