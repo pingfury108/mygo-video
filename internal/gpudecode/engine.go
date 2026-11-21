@@ -558,15 +558,16 @@ func (e *Engine) tracing() bool {
 // has two parts. One is the wait from handing it over to it being seen: the
 // window draws it and the present takes a refresh, 16ms at 60Hz. The other is
 // what choosing among pictures costs: they stand a step apart, and the one
-// picked for a moment is on average half a step early, so the picture trails
-// the sound by that much. mpv does not pay it, as its vo waits on the clock
-// itself; a window that asks for a picture when it draws does.
+// picked for a moment is on average half a step early — but the window asks
+// every 31ms here, nearer the step than a half of it, so a full half step
+// held the gap at zero and was heard a little slow. A quarter of a step is
+// what this machine's playback answered to.
 func (e *Engine) leadLocked() time.Duration {
 	step := e.step
 	if step <= 0 {
 		step = 40 * time.Millisecond
 	}
-	return 16*time.Millisecond + step/2 + e.avOffset()
+	return 16*time.Millisecond + step/4 + e.avOffset()
 }
 
 // syncLine reports the playhead against the picture the screen now shows,
