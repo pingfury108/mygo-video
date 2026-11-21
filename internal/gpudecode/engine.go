@@ -14,6 +14,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,12 +94,16 @@ type Engine struct {
 	// how often it does, which is the wait a picture takes to go up.
 	frameAt   time.Time
 	frameStep time.Duration
-	state     ui.VideoState
-	err       error
-	last      time.Duration // where the picture last shown stood
-	ended     bool
-	stopped   bool
-	skipping  bool // the decoder is passing non-reference frames to catch up
+	// avShift is the offset the offset file last held, and avReadAt when it
+	// was read.
+	avShift  time.Duration
+	avReadAt time.Time
+	state    ui.VideoState
+	err      error
+	last     time.Duration // where the picture last shown stood
+	ended    bool
+	stopped  bool
+	skipping bool // the decoder is passing non-reference frames to catch up
 	// audioEndedAt is when the sound ran out, zero while it plays: the
 	// picture goes on by the wall clock from there, for a film whose
 	// closing titles outlast its last sound.
@@ -399,6 +405,10 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	if lead > 25*time.Millisecond {
 		lead = 25 * time.Millisecond
 	}
+	// avOffset is what the picture is moved against the sound by, read from
+	// a file for a machine whose delay belongs to its output rather than to
+	// this engine: adjusted on the spot, as mpv's --audio-delay is.
+	lead += e.avOffset()
 	iff := pos + lead
 	// Drop every picture the playhead passed, keeping the one showing.
 	for len(e.queue) > 1 && e.queue[1].at <= iff {
@@ -423,6 +433,34 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	return e.current, false, true
 }
 
+// avOffset is how far the picture is moved against the sound, read from a
+// small file so a machine whose output delay is not the engine's can be
+// brought into line while it plays: a positive number shows the picture
+// earlier, which is what a sound that runs ahead wants. Read once a second.
+func (e *Engine) avOffset() time.Duration {
+	now := time.Now()
+	if now.Sub(e.avReadAt) < time.Second {
+		return e.avShift
+	}
+	e.avReadAt = now
+	b, err := os.ReadFile(filepath.Join(os.TempDir(), "mygo-av-offset.txt"))
+	if err != nil {
+		return e.avShift
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		return e.avShift
+	}
+	if n > 1000 {
+		n = 1000
+	}
+	if n < -1000 {
+		n = -1000
+	}
+	e.avShift = time.Duration(n) * time.Millisecond
+	return e.avShift
+}
+
 // syncLine reports the playhead against the picture the screen now shows,
 // read after that picture was chosen: a line made before it compared this
 // moment's playhead with the last one's picture, and showed a gap of its own.
@@ -431,9 +469,9 @@ func (e *Engine) syncLine(pos time.Duration) string {
 	if len(e.queue) > 0 {
 		q0, qn = e.queue[0].at, e.queue[len(e.queue)-1].at
 	}
-	return fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms lead=%v ui=%v queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
-		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(), (e.frameStep / 2).Round(time.Millisecond),
-		e.frameStep.Round(time.Millisecond), len(e.queue),
+	return fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms lead=%v+%v ui=%v queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
+		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(),
+		(e.frameStep / 2).Round(time.Millisecond), e.avShift, e.frameStep.Round(time.Millisecond), len(e.queue),
 		q0.String(), qn.String(), e.skipping, e.rate, e.ended)
 }
 

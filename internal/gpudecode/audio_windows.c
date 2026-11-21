@@ -44,6 +44,12 @@ typedef struct {
 	// places are dropped, as a seek lands before the one asked for.
 	int64_t             startUs;
 	AVRational          tb;     // the stream's time base, for those frames
+	// firstUs is the timestamp of the first frame that reaches the device,
+	// which a seek leaves short of the place it asked for: the sound's
+	// samples count from there, and a playhead that starts them at the place
+	// asked for runs ahead by the difference.
+	int64_t             firstUs;
+	int                 haveFirst;
 
 	// pcm is what swr made of the audio frame last decoded, and left of it
 	// how many frames are yet to play.
@@ -173,6 +179,17 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	if (swr_init(a->swr) < 0) return -15;
 
 	REFERENCE_TIME dur = 10000000LL * 4 / 10; // 400ms of buffer
+	// Read before the format is freed, which is where a wild value came
+	// from: the rates on either side of the resampler, and the device format.
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf),
+			"audio_open: source %dHz %dch %s -> device %dHz %dch tag=0x%04x bits=%d block=%d chunk=%u",
+			a->dec->sample_rate, a->dec->ch_layout.nb_channels,
+			av_get_sample_fmt_name(a->dec->sample_fmt), a->rate, a->channels,
+			(int)fmt->wFormatTag, (int)fmt->wBitsPerSample, (int)a->bytes, (unsigned)a->chunk);
+		audio_line(buf);
+	}
 	audio_line("audio_open: initializing device");
 	if (FAILED(a->client->lpVtbl->Initialize(a->client, AUDCLNT_SHAREMODE_SHARED,
 		AUDCLNT_STREAMFLAGS_NOPERSIST, dur, 0, fmt, NULL))) {
@@ -196,18 +213,6 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	}
 	a->tb = a->fmt->streams[a->stream]->time_base;
 	if (startUs > 0) audio_seek(a, startUs);
-	{
-		// The rates on either side of the resampler, and the format the
-		// device takes: a sound that plays faster than the picture is a
-		// mismatch here, which the log would otherwise not show.
-		char buf[256];
-		snprintf(buf, sizeof(buf),
-			"audio_open: source %dHz %dch %s -> device %dHz %dch tag=0x%04x bits=%d block=%d chunk=%u",
-			a->dec->sample_rate, a->dec->ch_layout.nb_channels,
-			av_get_sample_fmt_name(a->dec->sample_fmt), a->rate, a->channels,
-			(int)fmt->wFormatTag, (int)fmt->wBitsPerSample, (int)a->bytes, (unsigned)a->chunk);
-		audio_line(buf);
-	}
 	audio_line("audio_open: device ready");
 	return 0;
 }
@@ -228,6 +233,19 @@ static int audio_decode(Audio *a) {
 					av_frame_unref(a->frame);
 					continue;
 				}
+			}
+			// The timestamp of the first sample the device will play: the
+			// seek lands on the frame before the place it asked for, and the
+			// sound of the frames it dropped does not exist, so this reaches
+			// past the place asked for by however much it was rounded.
+			if (!a->haveFirst && a->frame->pts != AV_NOPTS_VALUE && a->tb.num > 0) {
+				a->firstUs = av_rescale_q(a->frame->pts, a->tb, AV_TIME_BASE_Q);
+				a->haveFirst = 1;
+				char buf[160];
+				snprintf(buf, sizeof(buf), "audio_open: first frame %.3fs, sought %.3fs, %+dms",
+					a->firstUs / 1e6, a->startUs / 1e6,
+					(int)((a->firstUs - a->startUs) / 1000));
+				audio_line(buf);
 			}
 			int cap = swr_get_out_samples(a->swr,
 				a->frame->nb_samples + (a->frame->nb_samples % 100));
@@ -354,6 +372,12 @@ static int64_t audio_position(Audio *a) {
 			INT64 now = (INT64)((double)qpc.QuadPart * 1e7 / (double)freq.QuadPart);
 			INT64 behind = now - (INT64)qpcPosition;
 			if (behind > 0 && behind < 10 * 10000000LL) us -= behind / 10;
+			if (us > 0) {
+				// The samples count from the first frame that reached the
+				// device, which a seek leaves past the place it asked for:
+				// the shift puts the count on the stream's own timeline.
+				us += a->haveFirst ? a->firstUs - a->startUs : 0;
+			}
 			return us > 0 ? us : 0;
 		}
 	}
@@ -397,6 +421,7 @@ static int audio_seek(Audio *a, int64_t us) {
 	if (a->dec) avcodec_flush_buffers(a->dec);
 	a->pcmFrames = 0;
 	a->pcmAt = 0;
+	a->haveFirst = 0;
 	if (a->client) {
 		a->client->lpVtbl->Stop(a->client);
 		a->client->lpVtbl->Reset(a->client);
