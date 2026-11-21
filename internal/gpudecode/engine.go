@@ -192,8 +192,8 @@ func (e *Engine) runSound() {
 		e.snd.Play()
 		n := e.snd.Fill()
 		if n <= 0 {
-			time.Sleep(20 * time.Millisecond)
-		} else {
+			// Nothing was written: the sound is over, or the source stalled.
+			// A device that drives the writing gave its own wait already.
 			time.Sleep(5 * time.Millisecond)
 		}
 		// The position is read here, off the window's frame: the call crosses

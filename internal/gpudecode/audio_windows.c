@@ -37,6 +37,7 @@ typedef struct {
 	int                 channels;
 	int                 bytes; // a frame of all channels
 	HANDLE              event;
+	int                 noWait; // the first fill before the device runs waits for none
 	int                 started;
 	int                 eof;    // the sound of the file is over
 	int                 readErrs; // reads in a row that failed
@@ -146,6 +147,22 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 		return -11;
 	}
 	enumr->lpVtbl->Release(enumr);
+	// The device the sound comes out of, by name: a session sent over a
+	// remote desktop plays it through the redirection of that session, which
+	// buffers the sound on a way of its own, and nothing in the player can
+	// know how long that way is.
+	{
+		LPWSTR id = NULL;
+		if (SUCCEEDED(dev->lpVtbl->GetId(dev, &id)) && id) {
+			char name[512];
+			name[0] = 0;
+			WideCharToMultiByte(CP_UTF8, 0, id, -1, name, sizeof(name) - 1, NULL, NULL);
+			char line[600];
+			snprintf(line, sizeof(line), "audio_open: device %s", name);
+			audio_line(line);
+			CoTaskMemFree(id);
+		}
+	}
 	if (FAILED(dev->lpVtbl->Activate(dev, &IID_CLIENT, CLSCTX_ALL, NULL,
 		(void **)&a->client))) {
 		dev->lpVtbl->Release(dev);
@@ -178,7 +195,7 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	av_channel_layout_uninit(&layout);
 	if (swr_init(a->swr) < 0) return -15;
 
-	REFERENCE_TIME dur = 10000000LL * 4 / 10; // 400ms of buffer
+	REFERENCE_TIME dur = 10000000LL * 2 / 10; // 200ms of buffer, as mpv's
 	// Read before the format is freed, which is where a wild value came
 	// from: the rates on either side of the resampler, and the device format.
 	{
@@ -191,12 +208,24 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 		audio_line(buf);
 	}
 	audio_line("audio_open: initializing device");
+	// Event driven, as mpv opens it: the device asks for the next period and
+	// the sound is written then, so what it reports of its place and what it
+	// plays stay one thing. Polled instead, the writes land wherever the
+	// sleep let them, and the two come apart by however late that was.
+	a->event = CreateEventW(NULL, FALSE, FALSE, NULL);
+	DWORD flags = AUDCLNT_STREAMFLAGS_NOPERSIST;
+	if (a->event) flags |= AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
 	if (FAILED(a->client->lpVtbl->Initialize(a->client, AUDCLNT_SHAREMODE_SHARED,
-		AUDCLNT_STREAMFLAGS_NOPERSIST, dur, 0, fmt, NULL))) {
+		flags, dur, 0, fmt, NULL))) {
 		CoTaskMemFree(fmt);
 		return -16;
 	}
 	CoTaskMemFree(fmt);
+	if (a->event && FAILED(a->client->lpVtbl->SetEventHandle(a->client, a->event))) {
+		CloseHandle(a->event);
+		a->event = NULL;
+	}
+	audio_line(a->event ? "audio_open: event driven" : "audio_open: polled");
 	if (FAILED(a->client->lpVtbl->GetBufferSize(a->client, &a->chunk))) return -17;
 	if (FAILED(a->client->lpVtbl->GetService(a->client, &IID_RENDER,
 		(void **)&a->render))) return -18;
@@ -298,6 +327,12 @@ static int audio_decode(Audio *a) {
 // how many frames it wrote; 0 when the sound is over.
 static int audio_fill(Audio *a) {
 	audio_apartment();
+	// The device's own clock is waited on where it raises one: a period that
+	// has room is written then, rather than whenever a sleep ended.
+	if (a->event && !a->noWait) {
+		DWORD w = WaitForSingleObject(a->event, 20);
+		if (w == WAIT_TIMEOUT) return 0;
+	}
 	UINT32 pad = 0;
 	if (FAILED(a->client->lpVtbl->GetCurrentPadding(a->client, &pad))) return -24;
 	UINT32 want = a->chunk - pad;
@@ -340,7 +375,11 @@ static int audio_play(Audio *a) {
 		return 0;
 	}
 	// Fill the buffer before starting, so the sound does not crackle at once.
+	// The device raises no period until it runs, so this first fill waits for
+	// none.
+	a->noWait = 1;
 	audio_fill(a);
+	a->noWait = 0;
 	HRESULT sr = a->client->lpVtbl->Start(a->client);
 	audio_trace(a, "start", (int)sr);
 	if (FAILED(sr)) return -26;
