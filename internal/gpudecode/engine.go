@@ -98,12 +98,18 @@ type Engine struct {
 	// was read.
 	avShift  time.Duration
 	avReadAt time.Time
-	state    ui.VideoState
-	err      error
-	last     time.Duration // where the picture last shown stood
-	ended    bool
-	stopped  bool
-	skipping bool // the decoder is passing non-reference frames to catch up
+	avFixed  bool // set by SetAVOffset, which the file no longer overrides
+	// traceOn says a file asks for every picture to be written down, and
+	// traceAt when that was last checked; traceLast is the last written.
+	traceOn   bool
+	traceAt   time.Time
+	traceLast time.Duration
+	state     ui.VideoState
+	err       error
+	last      time.Duration // where the picture last shown stood
+	ended     bool
+	stopped   bool
+	skipping  bool // the decoder is passing non-reference frames to catch up
 	// audioEndedAt is when the sound ran out, zero while it plays: the
 	// picture goes on by the wall clock from there, for a film whose
 	// closing titles outlast its last sound.
@@ -362,15 +368,26 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	// the line compared this moment's playhead with the last one's picture
 	// and showed a gap that only the log itself had.
 	var pos time.Duration
+	var pictureLine string
 	defer func() {
 		line := ""
 		if e.syncLoggedAt.IsZero() || t.Sub(e.syncLoggedAt) >= 250*time.Millisecond {
 			e.syncLoggedAt = t
 			line = e.syncLine(pos)
 		}
+		// A picture that just reached the screen, written with the wall
+		// clock: a recording of the window tells how long it took to get
+		// there, which nothing inside the player can see.
+		if e.tracing() && e.last != e.traceLast {
+			e.traceLast = e.last
+			pictureLine = fmt.Sprintf("picture %.3f pos %.3f", e.last.Seconds(), pos.Seconds())
+		}
 		e.mu.Unlock()
 		if line != "" {
 			syncLog(line)
+		}
+		if pictureLine != "" {
+			frameLog(pictureLine)
 		}
 	}()
 	if len(e.queue) == 0 {
@@ -445,6 +462,9 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 // earlier, which is what a sound that runs ahead wants. Read once a second.
 func (e *Engine) avOffset() time.Duration {
 	now := time.Now()
+	if e.avFixed {
+		return e.avShift
+	}
 	if now.Sub(e.avReadAt) < time.Second {
 		return e.avShift
 	}
@@ -465,6 +485,37 @@ func (e *Engine) avOffset() time.Duration {
 	}
 	e.avShift = time.Duration(n) * time.Millisecond
 	return e.avShift
+}
+
+// SetAVOffset moves the picture against the sound while a playback runs: a
+// positive offset shows the picture earlier, which is what a sound that runs
+// ahead of it wants. It is the audio delay a player offers, and it outlasts
+// the file that holds one, which is only for finding the value.
+func (e *Engine) SetAVOffset(d time.Duration) {
+	e.mu.Lock()
+	e.avShift = d
+	e.avFixed = true
+	e.mu.Unlock()
+}
+
+// AVOffset is how far the picture stands from the sound.
+func (e *Engine) AVOffset() time.Duration {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.avShift
+}
+
+// tracing says whether a file asks for every picture to be written down, read
+// once a second.
+func (e *Engine) tracing() bool {
+	now := time.Now()
+	if now.Sub(e.traceAt) < time.Second {
+		return e.traceOn
+	}
+	e.traceAt = now
+	_, err := os.Stat(filepath.Join(os.TempDir(), "mygo-trace"))
+	e.traceOn = err == nil
+	return e.traceOn
 }
 
 // syncLine reports the playhead against the picture the screen now shows,
@@ -690,6 +741,21 @@ func audioLog(msg string) {
 // gap between the sound and the picture can be read after a playback.
 func syncLog(msg string) {
 	p := filepath.Join(os.TempDir(), "mygo-sync.log")
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %s\n", time.Now().Format("15:04:05.000"), msg)
+}
+
+// frameLog writes every picture the screen is given, with the wall clock it
+// was given at: against a recording of the window, that is the time a picture
+// takes to reach the screen, which no clock inside the player can know. It
+// only writes while a file asks for it, as a playback of twenty seconds is
+// five hundred lines.
+func frameLog(msg string) {
+	p := filepath.Join(os.TempDir(), "mygo-frames.log")
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return

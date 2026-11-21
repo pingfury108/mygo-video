@@ -34,6 +34,10 @@ func (a *app) playerPage(c *ui.Context) {
 	c.OnShortcut(0, ui.KeyF, a.toggleFullScreen)
 	c.OnShortcut(0, ui.KeyComma, func() { a.playNeighbor(-1) })
 	c.OnShortcut(0, ui.KeyPeriod, func() { a.playNeighbor(1) })
+	// The picture against the sound, for an output that delays one of them:
+	// the engine cannot measure a screen, and the ear can.
+	c.OnShortcut(0, ui.KeyBracketLeft, func() { a.nudgeAV(-20 * time.Millisecond) })
+	c.OnShortcut(0, ui.KeyBracketRight, func() { a.nudgeAV(20 * time.Millisecond) })
 
 	if a.drawer || !pl.Playing() || !pl.Ready() {
 		a.uiHidden = false

@@ -222,9 +222,13 @@ type app struct {
 	detailScroll    ui.ScrollState
 	settingsScroll  ui.ScrollState
 
-	player       *ui.VideoPlayer
-	playing      media.Item
-	volume       float64
+	player  *ui.VideoPlayer
+	playing media.Item
+	volume  float64
+	// avOffset moves the picture against the sound for this machine's
+	// output; avTune is the engine playing now, if it can be moved.
+	avOffset     time.Duration
+	avTune       avTuner
 	seek         float64
 	seekedAt     time.Time
 	seekDragging bool
@@ -345,6 +349,7 @@ func (a *app) start() {
 	a.dataDir = dir
 	a.mark("ready", processStart)
 	a.volume = st.Volume()
+	a.avOffset = st.AVOffset()
 	a.danmakuPrefs = st.Danmaku()
 	roots := st.Roots()
 	if len(roots) == 0 {
@@ -1205,6 +1210,40 @@ func (a *app) setVolume(v float64) {
 func (a *app) say(format string, args ...any) {
 	a.toast = fmt.Sprintf(format, args...)
 	a.invalidate()
+}
+
+// avTuner is an engine whose picture can be moved against its sound, for an
+// output that delays one of them: the GPU one does, the others do not.
+type avTuner interface {
+	SetAVOffset(time.Duration)
+}
+
+// nudgeAV moves the picture against the sound by d, keeps it for the next
+// playback, and says where it stands: the audio delay a player offers, which
+// is the only way software can know what a screen or a sound card adds.
+func (a *app) nudgeAV(d time.Duration) {
+	a.avOffset += d
+	if a.avOffset > 2*time.Second {
+		a.avOffset = 2 * time.Second
+	}
+	if a.avOffset < -2*time.Second {
+		a.avOffset = -2 * time.Second
+	}
+	if a.avTune != nil {
+		a.avTune.SetAVOffset(a.avOffset)
+	}
+	if a.store != nil {
+		a.store.SetAVOffset(a.avOffset)
+	}
+	side := "画面提前"
+	if a.avOffset < 0 {
+		side = "画面延后"
+	}
+	v := a.avOffset
+	if v < 0 {
+		v = -v
+	}
+	a.say("%s %d ms", side, v.Milliseconds())
 }
 
 // diag writes a line to diag.log, for what a run should leave behind.

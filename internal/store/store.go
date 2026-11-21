@@ -23,6 +23,11 @@ type Data struct {
 	IPTV     IPTVConfig                `json:"iptv,omitempty"`
 	// Rate is the speed last chosen, for the next video too.
 	Rate float64 `json:"rate,omitempty"`
+	// AVOffsetMs moves the picture against the sound, in milliseconds: a
+	// positive value shows the picture earlier, which a sound that runs ahead
+	// of it wants. It belongs to the machine's output, not to a video, so one
+	// value serves every playback.
+	AVOffsetMs int64 `json:"avOffsetMs,omitempty"`
 	// Items is what the last scan found, shown at once on the next run
 	// while a new scan goes on.
 	Items     []media.Item `json:"items,omitempty"`
@@ -179,6 +184,22 @@ func (s *Store) Volume() float64 {
 func (s *Store) SetVolume(v float64) {
 	s.mu.Lock()
 	s.data.Volume = v
+	s.mu.Unlock()
+	s.Save()
+}
+
+// AVOffset is how far the picture stands from the sound, kept for the next
+// playback and the next run.
+func (s *Store) AVOffset() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Duration(s.data.AVOffsetMs) * time.Millisecond
+}
+
+// SetAVOffset keeps where the picture stands from the sound.
+func (s *Store) SetAVOffset(d time.Duration) {
+	s.mu.Lock()
+	s.data.AVOffsetMs = d.Milliseconds()
 	s.mu.Unlock()
 	s.Save()
 }

@@ -25,6 +25,12 @@ func (a *app) gpuPlayer(it media.Item) (*ui.VideoPlayer, bool) {
 		a.diag("gpu engine: %v", err)
 		return nil, false
 	}
+	// The output of this machine may delay the picture or the sound: the
+	// offset kept from the last playback moves it back into line.
+	a.avTune = e
+	if a.avOffset != 0 {
+		e.SetAVOffset(a.avOffset)
+	}
 	a.diag("gpu engine: %s", url)
 	return ui.NewVideoPlayerOf(e), true
 }
