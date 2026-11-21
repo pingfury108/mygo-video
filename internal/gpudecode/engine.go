@@ -597,10 +597,11 @@ func (e *Engine) leadLocked() time.Duration {
 	}
 	if d := now.Sub(e.syncErrAt); d >= 250*time.Millisecond {
 		// How far the picture on screen stands from the playhead, which is
-		// the error to correct. A picture ahead of the sound wants the next
-		// one later, so the correction carries the sign of the gap into the
-		// threshold — mpv: mpctx->delay += change, where change follows
-		// a_pts - v_pts, the sound against the picture.
+		// the error to correct. A picture behind the sound goes up too soon
+		// and wants holding; one ahead wants letting through sooner. mpv
+		// lays a tenth of a_pts - v_pts onto its account each frame, and
+		// the account is what the next frame is due against: a positive
+		// account holds it, a negative one calls it early.
 		err := (e.last - pos) / 10
 		lim := step / 4
 		if err > lim {
@@ -609,18 +610,20 @@ func (e *Engine) leadLocked() time.Duration {
 		if err < -lim {
 			err = -lim
 		}
-		e.syncErr -= err
+		e.syncErr += err
+		// The account stands for what the picture on screen has yet to
+		// show: below zero it would call a picture before the one showing
+		// has ended, and above a step it would hold one past its moment.
+		if e.syncErr < -step/8 {
+			e.syncErr = -step / 8
+		}
+		if e.syncErr > step/2 {
+			e.syncErr = step / 2
+		}
 		e.syncErrAt = now
 		if e.syncErr > 2*time.Second || e.syncErr < -2*time.Second {
 			syncLog(fmt.Sprintf("DESYNC picture=%.3f pos=%.3f corr=%.3f", e.last.Seconds(), pos.Seconds(), e.syncErr.Seconds()))
 		}
-	}
-	// The correction cannot push the account below zero: a picture shown
-	// stands until its step is spent whatever the correction says, and a
-	// negative account would only hold the next picture back past the
-	// moment the last one ended.
-	if e.syncErr < 0 {
-		e.syncErr = 0
 	}
 	if pos > e.last {
 		if left := step - (pos - e.last); left > 0 {
