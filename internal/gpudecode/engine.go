@@ -581,9 +581,12 @@ func (e *Engine) posLocked(t time.Time) time.Duration {
 	return pos + time.Duration(float64(t.Sub(e.audioEndedAt))*e.rate)
 }
 
-// Interval is 0: each picture wakes the window as it comes due, which keeps the
-// picture on the sound's clock rather than on a tick of its own.
-func (e *Engine) Interval() time.Duration { return 0 }
+// Interval is the picture's own step, so the window asks for the next one on a
+// tick that belongs to the film rather than to when a wake happened to land:
+// asked for ad hoc, the presents fell 29ms, 66ms, 33ms, 63ms apart where the
+// film steps every 40, which is the picture running with the sound and against
+// it by turns. The wake still comes, for the first picture and for a seek.
+func (e *Engine) Interval() time.Duration { return e.stepOf() }
 
 // State reports how loading and playing go.
 func (e *Engine) State() (ui.VideoState, error) {
