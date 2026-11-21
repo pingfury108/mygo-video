@@ -597,7 +597,10 @@ func (e *Engine) leadLocked() time.Duration {
 	}
 	if d := now.Sub(e.syncErrAt); d >= 250*time.Millisecond {
 		// How far the picture on screen stands from the playhead, which is
-		// the error to correct; a tenth of it, as mpv takes.
+		// the error to correct. A picture ahead of the sound wants the next
+		// one later, so the correction carries the sign of the gap into the
+		// threshold — mpv: mpctx->delay += change, where change follows
+		// a_pts - v_pts, the sound against the picture.
 		err := (e.last - pos) / 10
 		lim := step / 4
 		if err > lim {
@@ -606,7 +609,7 @@ func (e *Engine) leadLocked() time.Duration {
 		if err < -lim {
 			err = -lim
 		}
-		e.syncErr += err
+		e.syncErr -= err
 		e.syncErrAt = now
 		if e.syncErr > 2*time.Second || e.syncErr < -2*time.Second {
 			syncLog(fmt.Sprintf("DESYNC picture=%.3f pos=%.3f corr=%.3f", e.last.Seconds(), pos.Seconds(), e.syncErr.Seconds()))
