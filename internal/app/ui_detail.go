@@ -80,11 +80,18 @@ func (a *app) detailPage(c *ui.Context) {
 						ui.Text(c, "选集").FontSize(13).FontWeight(600)
 						ui.Text(c, fmt.Sprintf("%d 集", len(eps))).FontSize(11).TextColor(p.faint)
 					})
-					for i := 0; i < len(eps); i += 6 {
-						end := min(i+6, len(eps))
+					// As many episodes a row as the page holds, each taking its
+					// share, rather than six on a wide window with the rest empty.
+					n := gridColumns(c, 32, 8, 112)
+					for i := 0; i < len(eps); i += n {
+						end := min(i+n, len(eps))
+						last := end - i
 						ui.Row(c).Gap(8).Children(func() {
 							for _, ep := range eps[i:end] {
 								a.episodeChip(c, ep, ep.ID == it.ID)
+							}
+							for k := last; k < n; k++ {
+								ui.Box(c).Grow(1)
 							}
 						})
 					}

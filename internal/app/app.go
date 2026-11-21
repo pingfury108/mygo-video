@@ -214,13 +214,13 @@ type app struct {
 	// focusSearch asks the search page to focus its field as it builds.
 	focusSearch bool
 
-	searchBox      ui.Handle
-	homeScroll     ui.ScrollState
-	libraryGrid    ui.GridState
-	webdavAllGrid  ui.GridState
-	libraryScroll  ui.ScrollState
-	detailScroll   ui.ScrollState
-	settingsScroll ui.ScrollState
+	searchBox       ui.Handle
+	homeScroll      ui.ScrollState
+	libraryScroll   ui.ScrollState
+	searchScroll    ui.ScrollState
+	webdavAllScroll ui.ScrollState
+	detailScroll    ui.ScrollState
+	settingsScroll  ui.ScrollState
 
 	player       *ui.VideoPlayer
 	playing      media.Item

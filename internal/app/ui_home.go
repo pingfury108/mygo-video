@@ -86,7 +86,7 @@ func (a *app) homePage(c *ui.Context) {
 				ui.Column(c).Gap(12).Children(func() {
 					sectionHead(c, "最近添加", a.libraryLine(), nil)
 					n := min(12, len(newest))
-					a.cardRow(c, newest[:n], 216)
+					a.cardRow(c, newest[:n])
 				})
 			}
 
@@ -193,16 +193,58 @@ func (a *app) continueHero(c *ui.Context, it media.Item) {
 
 // pluginGrid lays a plugin's videos out in rows, filling the width, so a
 // page of them takes the room it has.
-func (a *app) pluginGrid(c *ui.Context, items []media.Item) {
-	const cols = 4
-	for i := 0; i < len(items); i += cols {
-		end := min(i+cols, len(items))
-		ui.Row(c).Gap(14).Children(func() {
-			for _, it := range items[i:end] {
-				a.videoCard(c, it, 216)
+// gridColumns is how many cards a page fits across: as many as share its
+// width at minW each with gap between them, so a wide window shows more of
+// them rather than a band of empty space beside a fixed count.
+func gridColumns(c *ui.Context, gutter, gap, minW float32) int {
+	w, _ := c.Size()
+	avail := w - 232 - gutter*2 // the sidebar, and the page's own side gaps
+	n := int((avail + gap) / (minW + gap))
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// gridRows lays n items out in rows that share the page's width: as many
+// columns as it holds at minW each with gap between them, every item taking
+// a share, so a wide window shows more of them rather than a band of empty
+// space. A row that is not full keeps the shares of the rows above. The
+// caller scrolls it.
+func (a *app) gridRows(c *ui.Context, n int, gutter, gap, minW float32, item func(i int)) {
+	if n == 0 {
+		return
+	}
+	cols := gridColumns(c, gutter, gap, minW)
+	if cols > n {
+		cols = n
+	}
+	for i := 0; i < n; i += cols {
+		end := min(i+cols, n)
+		last := end - i
+		ui.Row(c).Gap(gap).Children(func() {
+			for k := i; k < end; k++ {
+				item(k)
+			}
+			for k := last; k < cols; k++ {
+				ui.Box(c).Grow(1)
 			}
 		})
 	}
+}
+
+// pluginGrid lays a section's videos out: as many columns as the page's
+// width holds at the smallest card worth showing, each card taking an equal
+// share of it, so a wide window shows more of them rather than a band of
+// empty space beside four.
+func (a *app) pluginGrid(c *ui.Context, items []media.Item) {
+	if len(items) == 0 {
+		return
+	}
+	const gap = float32(14)
+	a.gridRows(c, len(items), 32, gap, 190, func(i int) {
+		a.videoCard(c, items[i], 0)
+	})
 }
 
 // pluginTabChip is one of a plugin's pages: its home, or its library.

@@ -34,7 +34,7 @@ func TestShots(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := shotApp(t)
-	tt := ui.NewTester(a.view, 1180, 780)
+	tt := ui.NewTester(a.view, 1440, 900)
 
 	shoot := func(name string) {
 		t.Helper()
@@ -179,7 +179,7 @@ func TestPluginShots(t *testing.T) {
 	a.posterBusy = map[string]bool{}
 	a.posterUsed = map[string]time.Time{}
 
-	tt := ui.NewTester(a.view, 1180, 780)
+	tt := ui.NewTester(a.view, 1440, 900)
 	shoot := func(name string) {
 		t.Helper()
 		tt.Frame()
@@ -260,7 +260,7 @@ func TestWebDAVShots(t *testing.T) {
 		{Path: "Movies/Heat (1995).mkv", Name: "Heat (1995).mkv", Size: 8_000_000_000},
 		{Path: "Movies/Dune.mkv", Name: "Dune.mkv", Size: 6_000_000_000},
 	})
-	tt := ui.NewTester(a.view, 1180, 780)
+	tt := ui.NewTester(a.view, 1440, 900)
 	shoot := func(name string) {
 		t.Helper()
 		tt.Frame()
@@ -302,7 +302,7 @@ func TestWebDAVAllShot(t *testing.T) {
 		{Path: "Shows/Fog Harbour S02E05.mp4", Name: "Fog Harbour S02E05.mp4", Size: 1_200_000_000},
 	})
 	a.route = pageHome
-	tt := ui.NewTester(a.view, 1180, 780)
+	tt := ui.NewTester(a.view, 1440, 900)
 	tt.Frame()
 	tt.Frame()
 	f, err := os.Create(filepath.Join(dir, "16-webdav-all.png"))
@@ -334,7 +334,7 @@ func TestIPTVShot(t *testing.T) {
 		{Name: "浙江卫视", Group: "卫视", URL: "http://example.com/zhejiang.m3u8"},
 	}
 	a.iptvGroups = []string{"央视", "卫视"}
-	tt := ui.NewTester(a.view, 1180, 780)
+	tt := ui.NewTester(a.view, 1440, 900)
 	tt.Frame()
 	tt.Frame()
 	f, err := os.Create(filepath.Join(dir, "17-iptv-home.png"))
@@ -407,7 +407,7 @@ func TestPluginsShot(t *testing.T) {
 	a.pluginChecked = map[string]bool{}
 	a.route = pagePlugins
 
-	tt := ui.NewTester(a.view, 1180, 780)
+	tt := ui.NewTester(a.view, 1440, 900)
 	shoot := func(name string) {
 		t.Helper()
 		tt.Frame()

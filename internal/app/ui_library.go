@@ -49,9 +49,13 @@ func (a *app) libraryPage(c *ui.Context) {
 		return
 	}
 
-	ui.GridView(c, &a.libraryGrid, len(items), 190, 176, func(i int) {
-		a.videoCard(c, items[i], 0)
-	}).Grow(1).Padding(8, 28, 36, 28)
+	ui.Scroll(c).Grow(1).TrackScroll(&a.libraryScroll).Children(func() {
+		ui.Column(c).Padding(8, 32, 36, 32).Children(func() {
+			a.gridRows(c, len(items), 32, 14, 190, func(i int) {
+				a.videoCard(c, items[i], 0)
+			})
+		})
+	})
 }
 
 // searchPage finds videos by name, series or episode.
@@ -102,9 +106,11 @@ func (a *app) searchPage(c *ui.Context) {
 			})
 		default:
 			ui.Text(c, "找到 "+strconv.Itoa(len(results))+" 个").FontSize(11).TextColor(p.faint)
-			ui.GridView(c, nil, len(results), 190, 176, func(i int) {
-				a.videoCard(c, results[i], 0)
-			}).Grow(1)
+			ui.Scroll(c).Grow(1).TrackScroll(&a.searchScroll).Children(func() {
+				a.gridRows(c, len(results), 32, 14, 190, func(i int) {
+					a.videoCard(c, results[i], 0)
+				})
+			})
 		}
 	})
 }

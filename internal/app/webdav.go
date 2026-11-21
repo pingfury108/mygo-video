@@ -352,7 +352,7 @@ func (a *app) webdavHome(c *ui.Context) {
 			if len(a.webdavVideos) > 0 {
 				ui.Column(c).Gap(12).Children(func() {
 					sectionHead(c, "视频", fmt.Sprintf("%d 个", len(a.webdavVideos)), nil)
-					a.cardRow(c, a.webdavVideos, 216)
+					a.cardRow(c, a.webdavVideos)
 				})
 			}
 
@@ -461,9 +461,13 @@ func (a *app) webdavAllView(c *ui.Context) {
 		}
 		return
 	}
-	ui.GridView(c, &a.webdavAllGrid, n, 190, 176, func(i int) {
-		a.videoCard(c, a.webdavAllItems[i], 0)
-	}).Grow(1).Padding(8, 32, 36, 32)
+	ui.Scroll(c).Grow(1).TrackScroll(&a.webdavAllScroll).Children(func() {
+		ui.Column(c).Padding(8, 32, 36, 32).Children(func() {
+			a.gridRows(c, n, 32, 14, 190, func(i int) {
+				a.videoCard(c, a.webdavAllItems[i], 0)
+			})
+		})
+	})
 }
 
 // scanWebDAVAll lists every folder below the one showing, keeping the

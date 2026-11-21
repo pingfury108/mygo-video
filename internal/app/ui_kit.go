@@ -177,13 +177,37 @@ func emptyState(c *ui.Context, title, sub string, action func()) {
 }
 
 // row is a horizontal run of cards, scrolling sideways.
-func (a *app) cardRow(c *ui.Context, items []media.Item, width float32) {
+// cardRow is a row of videos: a scroll when there are more than a row holds,
+// and otherwise a row that shares the width. Either way a card is a share of
+// the page's width, so the row fills it rather than stopping at a fixed size
+// with empty space beside it.
+func (a *app) cardRow(c *ui.Context, items []media.Item) {
 	if len(items) == 0 {
 		return
 	}
-	ui.ScrollHorizontal(c).Height(width*9/16 + 66).Gap(14).Children(func() {
+	const gap = float32(14)
+	cols := gridColumns(c, 32, gap, 190)
+	w, _ := c.Size()
+	avail := w - 232 - 64
+	cardW := (avail - gap*float32(cols-1)) / float32(cols)
+	if cardW < 120 {
+		cardW = 120
+	}
+	height := cardW*9/16 + 66
+	if len(items) <= cols {
+		ui.Row(c).Height(height).Gap(gap).Children(func() {
+			for _, it := range items {
+				a.videoCard(c, it, 0)
+			}
+			for k := len(items); k < cols; k++ {
+				ui.Box(c).Grow(1)
+			}
+		})
+		return
+	}
+	ui.ScrollHorizontal(c).Height(height).Gap(gap).Children(func() {
 		for _, it := range items {
-			a.videoCard(c, it, width)
+			a.videoCard(c, it, cardW)
 		}
 	})
 }
