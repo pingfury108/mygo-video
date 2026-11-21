@@ -398,9 +398,15 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	// guessed: this machine draws a 4K texture every 17ms, so a full
 	// interval of 17ms reached past the delay it was meant to cover, which
 	// the ear still heard as the sound a little late.
-	lead := e.frameStep / 2
+	// lead is how far ahead of the clock a picture is handed over: the
+	// window draws at its own frames, the picture waits for one of them, and
+	// the drawing reaches the screen a little later still, through the
+	// texture and the compositor. Seven tenths of a window frame is what this
+	// playback needed: half of one was short, the whole of one was long, and
+	// the answer fell between them.
+	lead := e.frameStep * 7 / 10
 	if lead <= 0 {
-		lead = 8 * time.Millisecond
+		lead = 12 * time.Millisecond
 	}
 	if lead > 25*time.Millisecond {
 		lead = 25 * time.Millisecond
