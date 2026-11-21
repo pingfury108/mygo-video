@@ -306,6 +306,12 @@ func (e *Engine) fill() {
 				if wait > 0 {
 					time.Sleep(wait)
 				}
+				// Lined up with the compositor's refresh before the window is
+				// asked to draw: handed over at a moment of its own, the
+				// picture waited for whichever refresh came next, and the
+				// presents landed 31ms and 61ms apart where the film steps
+				// every 40.
+				waitVsync()
 				wake()
 			} else {
 				time.Sleep(50 * time.Millisecond)
@@ -410,12 +416,16 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 			e.syncLoggedAt = t
 			line = e.syncLine(pos)
 		}
-		// A picture that just reached the screen, written with the wall
-		// clock: a recording of the window tells how long it took to get
-		// there, which nothing inside the player can see.
-		if e.tracing() && e.last != e.traceLast {
-			e.traceLast = e.last
-			pictureLine = fmt.Sprintf("picture %.3f pos %.3f", e.last.Seconds(), pos.Seconds())
+		// Every call the window makes, not just the calls that bring a new
+		// picture: the times between them are the window's own rhythm, which
+		// decides when a picture can reach the screen at all.
+		if e.tracing() {
+			fresh := "same"
+			if e.last != e.traceLast {
+				e.traceLast = e.last
+				fresh = "new"
+			}
+			pictureLine = fmt.Sprintf("%s picture %.3f pos %.3f lead %v", fresh, e.last.Seconds(), pos.Seconds(), e.leadLocked().Milliseconds())
 		}
 		e.mu.Unlock()
 		if line != "" {
@@ -541,11 +551,11 @@ func (e *Engine) tracing() bool {
 }
 
 // leadLocked is how far ahead of the clock a picture is handed over: the
-// window needs that long from being woken to the present reaching the screen,
-// which is half a refresh at 60Hz, plus whatever this machine's output adds,
-// which the listener sets.
+// window is woken just after a refresh, draws, and the present waits for the
+// refresh that follows, which is one refresh away. 16ms covers a 60Hz display
+// and stands a little short of a 50Hz one, which is nearer than guessing far.
 func (e *Engine) leadLocked() time.Duration {
-	return 8*time.Millisecond + e.avOffset()
+	return 16*time.Millisecond + e.avOffset()
 }
 
 // syncLine reports the playhead against the picture the screen now shows,
@@ -558,7 +568,7 @@ func (e *Engine) syncLine(pos time.Duration) string {
 	}
 	return fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms lead=%v+%v ui=%v queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
 		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(),
-		8*time.Millisecond, e.avShift, e.frameStep.Round(time.Millisecond), len(e.queue),
+		16*time.Millisecond, e.avShift, e.frameStep.Round(time.Millisecond), len(e.queue),
 		q0.String(), qn.String(), e.skipping, e.rate, e.ended)
 }
 
