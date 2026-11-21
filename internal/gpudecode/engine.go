@@ -88,9 +88,14 @@ type Engine struct {
 	// seeking is set from a seek until the sound's thread has made it: the
 	// device still reports the place it played before until then.
 	seeking bool
-	clock   time.Time // when playback began, zero while paused
-	paused  bool
-	rate    float64
+	// starting is set from a seek until a picture of the new place is ready:
+	// the sound seeks at a frame and the picture at a keyframe it decodes on
+	// from, so the sound would be away first and heard ahead of the picture,
+	// as mpv delays its audio start for (audio.c: audio_start_ao).
+	starting bool
+	clock    time.Time // when playback began, zero while paused
+	paused   bool
+	rate     float64
 	// sndSeek is a seek for the thread that owns the device to make: the
 	// call reads the source and must not hold the window.
 	sndSeek *time.Duration
@@ -171,18 +176,23 @@ func (e *Engine) runSound() {
 		time.Sleep(10 * time.Millisecond)
 	}
 	e.snd.Play()
+	startWait := 0
 	for {
 		e.mu.Lock()
 		stopped, paused := e.stopped, e.paused
 		seekReq := e.sndSeek
 		e.sndSeek = nil
+		// The sound waits for a picture of the place it was just sent to:
+		// its own seek lands on a frame, the picture's on a keyframe.
+		waiting := e.starting && len(e.queue) == 0
 		e.mu.Unlock()
 		if stopped {
 			return
 		}
 		// The sound is sought here, on its own thread: the seek reads the
 		// source over the network, and a window waiting for that would stop
-		// drawing for as long as it took.
+		// drawing for as long as it took. It comes before the wait for a
+		// picture, which would otherwise take the request and drop it.
 		if seekReq != nil {
 			e.snd.Seek(*seekReq)
 			e.mu.Lock()
@@ -190,6 +200,19 @@ func (e *Engine) runSound() {
 			e.mu.Unlock()
 			continue
 		}
+		if waiting {
+			e.snd.Pause()
+			// A place with no picture at all is a decoder that failed on
+			// it: the sound goes on rather than waiting there for good.
+			if startWait++; startWait == 400 {
+				e.mu.Lock()
+				e.starting = false
+				e.mu.Unlock()
+			}
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		startWait = 0
 		if paused {
 			e.snd.Pause()
 			time.Sleep(30 * time.Millisecond)
@@ -381,6 +404,9 @@ func (e *Engine) fill() {
 		}
 		e.queue = append(e.queue, queued{at: e.base + off, pic: pic})
 		e.state = ui.VideoReady
+		// A picture of the new place is ready, and the sound may start
+		// there with it.
+		e.starting = false
 		wk := e.wake
 		e.mu.Unlock()
 		if wk != nil {
@@ -718,6 +744,7 @@ func (e *Engine) Seek(d time.Duration) {
 	// place it played before: a read of it landing here would put that place
 	// back, and the picture would go with it.
 	e.seeking = snd != nil
+	e.starting = snd != nil
 	e.audioEndedAt = time.Time{}
 	e.current = ui.VideoPicture{}
 	if snd != nil {
