@@ -103,6 +103,10 @@ type Engine struct {
 	// seekSeq numbers the seeks: a drag sends many, and only the last is
 	// worth the decoder's while, as mpv merges its seeks.
 	seekSeq int64
+	// stall counts the fills in a row that wrote nothing, for a source that
+	// went quiet: past a minute the two stand together again where the film
+	// is, as mpv resets its audio for an underrun.
+	stall int
 	// syncLoggedAt is when the sync was last written down, once a second.
 	syncLoggedAt time.Time
 	// frameAt and frameStep are when the window last asked for a picture and
@@ -234,6 +238,32 @@ func (e *Engine) runSound() {
 			// Nothing was written: the sound is over, or the source stalled.
 			// A device that drives the writing gave its own wait already.
 			time.Sleep(5 * time.Millisecond)
+			// A source that went quiet for a long stretch stalls the sound the
+			// device still holds, and the picture runs on past it; both stand
+			// again where the film is once it comes back, as a seek makes them.
+			// mpv resets its audio for the same (audio.c: reset_audio_state on
+			// underrun).
+			e.mu.Lock()
+			if !e.stopped && !e.starting {
+				e.stall++
+				if e.stall > 120 { // a minute of failed fills
+					e.stall = 0
+					e.at = e.posLocked(time.Now())
+					e.audioPos = 0
+					e.audioAt = time.Time{}
+					e.starting = true
+					if snd := e.snd; snd != nil {
+						d := e.at
+						e.sndSeek = &d
+					}
+				}
+			} else if n == 0 && !e.snd.Done() && !e.stopped {
+				// playing, not at the end, nothing written
+				if e.stall > 0 {
+					e.stall--
+				}
+			}
+			e.mu.Unlock()
 		}
 		// The position is read here, off the window's frame: the call crosses
 		// into WASAPI, and a frame that waited for it would stutter. Only while
