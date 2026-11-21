@@ -295,16 +295,12 @@ func (e *Engine) fill() {
 			ahead = 12
 		}
 		if queueLen >= ahead || paused || src == nil {
-			// The window schedules itself at the moment each picture comes due
-			// (Interval), so this holds only a slow keep-alive: one wake a
-			// second, in case a schedule was lost, as the first pictures still
-			// wake it from below.
-			if wake != nil {
-				time.Sleep(time.Second)
-				wake()
-			} else {
-				time.Sleep(50 * time.Millisecond)
-			}
+			// This is the worker that keeps the queue full, not the scheduler:
+			// the window takes a picture off the top each of its frames, and the
+			// queue has to be refilled as it goes. Sleeping long here left it
+			// empty between sleeps, and the picture froze until the next burst
+			// — a film shown one second at a time.
+			time.Sleep(step / 2)
 			continue
 		}
 
