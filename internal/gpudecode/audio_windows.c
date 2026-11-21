@@ -15,7 +15,7 @@
 static const GUID IID_ENUM = {0xa95664d2,0x9614,0x4f35,{0xa7,0x46,0xde,0x8d,0xb6,0x36,0x17,0xe6}};
 static const GUID IID_CLIENT = {0x1cb9ad4c,0xdbfa,0x4c32,{0xb1,0x78,0xc2,0xf5,0x68,0xa7,0x03,0xb2}};
 static const GUID IID_RENDER = {0xf294acfc,0x3146,0x4483,{0xa7,0xbf,0xad,0xdc,0xa7,0xc2,0x60,0xe2}};
-static const GUID IID_CLOCK = {0xcd63314f,0x3fba,0x4a1f,{0x81,0x2c,0xef,0x96,0x35,0x87,0x28,0xe7}};
+static const GUID IID_CLOCK = {0xcd63314f,0x3fba,0x4a1f,{0x81,0x2e,0xef,0x93,0x5b,0x9d,0xba,0xb6}};
 static const GUID CLSID_ENUM = {0xbcde0395,0xe52f,0x467c,{0x8e,0x3d,0xc4,0x57,0x92,0x91,0x69,0x2e}};
 
 
@@ -27,6 +27,10 @@ typedef struct {
 
 	IAudioClient       *client;
 	IAudioRenderClient *render;
+	// clock is the device's own playback position, which counts what the
+	// mixer holds and the padding of the buffer does not.
+	IAudioClock        *clock;
+	UINT64              clockFreq;
 	UINT64              written; // frames handed to the device
 	UINT32              chunk; // frames a buffer holds
 	int                 rate;  // samples a second the device takes
@@ -179,8 +183,31 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	if (FAILED(a->client->lpVtbl->GetBufferSize(a->client, &a->chunk))) return -17;
 	if (FAILED(a->client->lpVtbl->GetService(a->client, &IID_RENDER,
 		(void **)&a->render))) return -18;
+	// The device's clock counts the frames it has played, mixer and all: the
+	// buffer's padding misses what the mixer still holds, and a playhead read
+	// from it runs ahead of the sound by that much.
+	if (SUCCEEDED(a->client->lpVtbl->GetService(a->client, &IID_CLOCK,
+		(void **)&a->clock))) {
+		UINT64 freq = 0;
+		if (FAILED(a->clock->lpVtbl->GetFrequency(a->clock, &freq)))
+			a->clockFreq = 0;
+		else
+			a->clockFreq = freq;
+	}
 	a->tb = a->fmt->streams[a->stream]->time_base;
 	if (startUs > 0) audio_seek(a, startUs);
+	{
+		// The rates on either side of the resampler, and the format the
+		// device takes: a sound that plays faster than the picture is a
+		// mismatch here, which the log would otherwise not show.
+		char buf[256];
+		snprintf(buf, sizeof(buf),
+			"audio_open: source %dHz %dch %s -> device %dHz %dch tag=0x%04x bits=%d block=%d chunk=%u",
+			a->dec->sample_rate, a->dec->ch_layout.nb_channels,
+			av_get_sample_fmt_name(a->dec->sample_fmt), a->rate, a->channels,
+			(int)fmt->wFormatTag, (int)fmt->wBitsPerSample, (int)a->bytes, (unsigned)a->chunk);
+		audio_line(buf);
+	}
 	audio_line("audio_open: device ready");
 	return 0;
 }
@@ -308,11 +335,28 @@ static void audio_pause(Audio *a) {
 	if (a->started) a->client->lpVtbl->Stop(a->client);
 }
 
-// audio_position is how far the device has played, in microseconds: what was
-// written, less what it still holds.
+// audio_position is how far the device has played, in microseconds, read off
+// its clock as mpv reads it (audio/out/ao_wasapi.c: get_device_delay): the
+// frames the clock counts, less the time the call itself took.
 static int64_t audio_position(Audio *a) {
 	audio_apartment();
 	if (!a->started) return 0;
+	if (a->clock && a->clockFreq > 0) {
+		UINT64 position = 0, qpcPosition = 0;
+		if (SUCCEEDED(a->clock->lpVtbl->GetPosition(a->clock, &position, &qpcPosition))) {
+			uint64_t frames = (uint64_t)((double)position * (double)a->rate / (double)a->clockFreq);
+			int64_t us = (int64_t)(frames * 1000000ULL / (uint64_t)a->rate);
+			// The clock reports where it was when it read, not where it is
+			// now: the call's own length comes off (100ns units).
+			LARGE_INTEGER qpc, freq;
+			QueryPerformanceCounter(&qpc);
+			QueryPerformanceFrequency(&freq);
+			INT64 now = (INT64)((double)qpc.QuadPart * 1e7 / (double)freq.QuadPart);
+			INT64 behind = now - (INT64)qpcPosition;
+			if (behind > 0 && behind < 10 * 10000000LL) us -= behind / 10;
+			return us > 0 ? us : 0;
+		}
+	}
 	UINT32 pad = 0;
 	if (FAILED(a->client->lpVtbl->GetCurrentPadding(a->client, &pad))) return 0;
 	UINT64 played = a->written > pad ? a->written - pad : 0;
@@ -327,6 +371,7 @@ static int audio_ended(Audio *a) { return a->eof; }
 static void audio_close(Audio *a) {
 	audio_apartment();
 	if (a->client) a->client->lpVtbl->Stop(a->client);
+	if (a->clock) a->clock->lpVtbl->Release(a->clock);
 	if (a->render) a->render->lpVtbl->Release(a->render);
 	if (a->client) a->client->lpVtbl->Release(a->client);
 	if (a->event) CloseHandle(a->event);

@@ -88,12 +88,16 @@ type Engine struct {
 	sndSeek *time.Duration
 	// syncLoggedAt is when the sync was last written down, once a second.
 	syncLoggedAt time.Time
-	state        ui.VideoState
-	err          error
-	last         time.Duration // where the picture last shown stood
-	ended        bool
-	stopped      bool
-	skipping     bool // the decoder is passing non-reference frames to catch up
+	// frameAt and frameStep are when the window last asked for a picture and
+	// how often it does, which is the wait a picture takes to go up.
+	frameAt   time.Time
+	frameStep time.Duration
+	state     ui.VideoState
+	err       error
+	last      time.Duration // where the picture last shown stood
+	ended     bool
+	stopped   bool
+	skipping  bool // the decoder is passing non-reference frames to catch up
 	// audioEndedAt is when the sound ran out, zero while it plays: the
 	// picture goes on by the wall clock from there, for a film whose
 	// closing titles outlast its last sound.
@@ -216,6 +220,11 @@ const (
 	// beats catching up frame by frame.
 	lagSkip = 600 * time.Millisecond
 	lagJump = 2500 * time.Millisecond
+
+	// videoLead is how far ahead of the sound's clock a picture is handed
+	// over: the window puts it up at its next draw, a frame or two later.
+	// Zero while the clock is being measured: a lead hides the reading.
+	videoLead = 0 * time.Millisecond
 )
 
 // fill keeps the queue stocked and the decoder's skip on the beat of the
@@ -348,10 +357,16 @@ func (e *Engine) SetWake(wake func()) {
 // finds room for the next sooner.
 func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	e.mu.Lock()
-	// Written once a second, outside the lock: the playhead against where the
-	// picture on screen stands, which is the sync as the window sees it.
-	line := ""
+	// Written outside the lock, after the picture is chosen: read before it,
+	// the line compared this moment's playhead with the last one's picture
+	// and showed a gap that only the log itself had.
+	var pos time.Duration
 	defer func() {
+		line := ""
+		if e.syncLoggedAt.IsZero() || t.Sub(e.syncLoggedAt) >= 250*time.Millisecond {
+			e.syncLoggedAt = t
+			line = e.syncLine(pos)
+		}
 		e.mu.Unlock()
 		if line != "" {
 			syncLog(line)
@@ -360,23 +375,28 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	if len(e.queue) == 0 {
 		return e.current, false, e.current.Surface != nil
 	}
-	pos := e.posLocked(t)
-	if t.Sub(e.syncLoggedAt) >= 250*time.Millisecond && e.current.Surface != nil {
-		e.syncLoggedAt = t
-		q0, qn := time.Duration(-1), time.Duration(-1)
-		if len(e.queue) > 0 {
-			q0 = e.queue[0].at
-			qn = e.queue[len(e.queue)-1].at
+	// How often the window asks for a picture: the lead above is meant to
+	// cover that wait, and the log says what it really is.
+	if !e.frameAt.IsZero() {
+		if d := t.Sub(e.frameAt); d > 0 && d < 200*time.Millisecond {
+			if e.frameStep == 0 {
+				e.frameStep = d
+			} else {
+				e.frameStep = (e.frameStep*7 + d) / 8
+			}
 		}
-		line = fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
-			pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(), len(e.queue),
-			q0.String(), qn.String(), e.skipping, e.rate, e.ended)
 	}
+	e.frameAt = t
+	pos = e.posLocked(t)
+	// The picture goes up a frame or two after the engine hands it over, at
+	// the window's next draw, so the one due now is the one for a little
+	// further on: without it the picture trails the sound by that draw.
+	iff := pos + videoLead
 	// Drop every picture the playhead passed, keeping the one showing.
-	for len(e.queue) > 1 && e.queue[1].at <= pos {
+	for len(e.queue) > 1 && e.queue[1].at <= iff {
 		e.queue = e.queue[1:]
 	}
-	if e.queue[0].at <= pos {
+	if e.queue[0].at <= iff {
 		changed := e.current.Surface != e.queue[0].pic.Surface
 		e.current = e.queue[0].pic
 		e.last = e.queue[0].at
@@ -393,6 +413,20 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 		return e.current, true, true
 	}
 	return e.current, false, true
+}
+
+// syncLine reports the playhead against the picture the screen now shows,
+// read after that picture was chosen: a line made before it compared this
+// moment's playhead with the last one's picture, and showed a gap of its own.
+func (e *Engine) syncLine(pos time.Duration) string {
+	q0, qn := time.Duration(-1), time.Duration(-1)
+	if len(e.queue) > 0 {
+		q0, qn = e.queue[0].at, e.queue[len(e.queue)-1].at
+	}
+	return fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms lead=%v ui=%v queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
+		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(), videoLead,
+		e.frameStep.Round(time.Millisecond), len(e.queue),
+		q0.String(), qn.String(), e.skipping, e.rate, e.ended)
 }
 
 // Sync reports where the picture and the sound stood when the picture now
