@@ -38,7 +38,10 @@ func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
 	}
 	handle, bw, bh, err := w.d.Picture()
 	if err != nil {
-		return ui.VideoPicture{}, 0, err
+		// A picture that carries no texture is the one the decoder flushed
+		// after a seek, before it decoded a fresh one: it is passed over and
+		// the next is decoded, rather than ending the whole playback.
+		return ui.VideoPicture{}, 0, errStale
 	}
 	// The handle is the key the renderer caches the opened texture by: two
 	// videos make different textures, and a key of one number would keep

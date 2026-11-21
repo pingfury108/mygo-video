@@ -117,11 +117,12 @@ static int dec_open(Dec *d, const char *url, const char *headers) {
 // with its texture and index, 2 for one in memory, 0 at the end, and a
 // negative step number that failed.
 static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
-	// The whole read-decode loop takes the section: a seek from the other
-	// thread must wait for the picture in hand, and the next one waits for
-	// the seek, or the two would mix state in one context.
-	EnterCriticalSection(&d->cs);
+	// The codec context is shared with a seek, so every use of it takes the
+	// section, and every return gives it back. A read of the source does not:
+	// over the network it may wait seconds, and a section held for that long
+	// freezes the window and every seek behind it.
 	for (;;) {
+		EnterCriticalSection(&d->cs);
 		int r = avcodec_receive_frame(d->dec, d->frame);
 		if (r == 0) {
 			*fmt = (int)d->frame->format;
@@ -139,37 +140,36 @@ static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
 			LeaveCriticalSection(&d->cs);
 			return 2;
 		}
-		if (r == AVERROR_EOF) {
-			LeaveCriticalSection(&d->cs);
-			return 0;
-		}
 		if (r != AVERROR(EAGAIN)) {
 			LeaveCriticalSection(&d->cs);
+			if (r == AVERROR_EOF) return 0;
 			return -20;
 		}
+		LeaveCriticalSection(&d->cs);
+
+		// Reading is the slow part, and the section is open for it.
 		int rr = av_read_frame(d->fmt, d->pkt);
 		if (rr < 0 && rr != AVERROR_EOF) {
 			// A read that failed partway is not the end of the video: a
-			// source that stalls is tried again with the section open, so a
-			// seek during the stall does not wait for it.
-			if (++d->readErrs > 200) {
-				LeaveCriticalSection(&d->cs);
-				return -30;
-			}
-			LeaveCriticalSection(&d->cs);
+			// source that stalls is tried again, and only a long run of
+			// failures gives up.
+			if (++d->readErrs > 200) return -30;
 			av_usleep(20000);
-			EnterCriticalSection(&d->cs);
 			continue;
 		}
 		if (rr < 0) {
+			EnterCriticalSection(&d->cs);
 			avcodec_send_packet(d->dec, NULL);
+			LeaveCriticalSection(&d->cs);
 			continue;
 		}
 		d->readErrs = 0;
+		EnterCriticalSection(&d->cs);
 		if (d->pkt->stream_index == d->stream) {
 			avcodec_send_packet(d->dec, d->pkt);
 		}
 		av_packet_unref(d->pkt);
+		LeaveCriticalSection(&d->cs);
 	}
 }
 
@@ -252,7 +252,12 @@ static int dec_seek_us(Dec *d, int64_t us) {
 		return r;
 	}
 	if (d->dec) avcodec_flush_buffers(d->dec);
+	// The texture of a picture decoded before the seek belongs to a frame the
+	// decoder no longer holds, and a picture converted from it would show the
+	// old place. Drop it, and let the next decode make a fresh one.
 	d->lastTex = NULL;
+	d->lastIndex = -1;
+	if (d->frame) av_frame_unref(d->frame);
 	LeaveCriticalSection(&d->cs);
 	return 0;
 }
