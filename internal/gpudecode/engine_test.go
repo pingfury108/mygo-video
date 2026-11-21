@@ -11,18 +11,21 @@ import (
 
 // fakeFrames hands out pictures at a step, after a delay each. Offsets may
 // follow a table of their own, for a video whose frames are not evenly
-// spaced.
+// spaced. A decoder asked to skip passes them without its decoding delay,
+// as skipping reference-frame work really does.
 type fakeFrames struct {
-	mu      sync.Mutex
-	step    time.Duration
-	slow    time.Duration
-	offsets []time.Duration
-	n       int
-	ended   bool
+	mu       sync.Mutex
+	step     time.Duration
+	slow     time.Duration
+	offsets  []time.Duration
+	n        int
+	ended    bool
+	skipping bool
+	skips    int
 }
 
 func (f *fakeFrames) Next() (ui.VideoPicture, time.Duration, error) {
-	if f.slow > 0 {
+	if f.slow > 0 && !f.skipping {
 		time.Sleep(f.slow)
 	}
 	f.mu.Lock()
@@ -41,6 +44,15 @@ func (f *fakeFrames) Next() (ui.VideoPicture, time.Duration, error) {
 	f.n++
 	pix := make([]byte, 4)
 	return ui.NewPixelsPicture(pix, 1, 1), off, nil
+}
+
+func (f *fakeFrames) SetSkip(on bool) {
+	f.mu.Lock()
+	if on != f.skipping {
+		f.skips++
+	}
+	f.skipping = on
+	f.mu.Unlock()
 }
 
 func (f *fakeFrames) Seek(d time.Duration) error { return nil }
@@ -84,7 +96,11 @@ func (c *fakeClock) Play() {
 }
 func (c *fakeClock) Pause() {
 	c.mu.Lock()
-	c.base = c.Position()
+	// Position takes this lock too: the elapsed time is folded in directly,
+	// a call from here would lock against itself.
+	if !c.start.IsZero() {
+		c.base += time.Duration(float64(time.Since(c.start)) * c.rate)
+	}
 	c.start = time.Time{}
 	c.mu.Unlock()
 }
@@ -277,4 +293,58 @@ func TestQueueKeepsAboutASecond(t *testing.T) {
 		t.Fatalf("queue held %d pictures, want about a second of them", max)
 	}
 	t.Logf("queue peaked at %d pictures (25 is a second)", max)
+}
+
+// TestLagTurnsSkipOn is mpv's set_frame_drops: a decoder too slow for the
+// video lets the playhead fall behind, and past half a second the engine
+// asks the decoder to pass over the frames that are not reference ones,
+// and back off once it has caught up.
+func TestLagTurnsSkipOn(t *testing.T) {
+	// Decoding at half the video's pace: the playhead keeps falling behind.
+	src := &fakeFrames{step: 40 * time.Millisecond, slow: 90 * time.Millisecond}
+	snd := &fakeClock{rate: 1}
+	e := newEngine(src, snd)
+	defer e.Close()
+	e.Play()
+
+	time.Sleep(2 * time.Second)
+	if src.skips == 0 {
+		t.Fatal("the decoder was never asked to skip")
+	}
+	t.Logf("skip turned on %d time(s) in %v of playback", src.skips, 2*time.Second)
+}
+
+// TestHugeLagJumpsToNewest is the ffplay threshold: when the playhead is
+// past every ready picture by seconds, showing them one by one is a
+// slideshow — the newest picture stands in at once.
+func TestHugeLagJumpsToNewest(t *testing.T) {
+	src := &fakeFrames{step: 40 * time.Millisecond}
+	snd := &fakeClock{rate: 1}
+	e := newEngine(src, snd)
+	defer e.Close()
+	e.Play()
+
+	// A pause keeps the queue from emptying, and the clock jump afterwards
+	// puts the playhead seconds past what it holds.
+	time.Sleep(1500 * time.Millisecond)
+	e.Pause()
+	time.Sleep(100 * time.Millisecond)
+	snd.Seek(2800 * time.Millisecond)
+	e.Play()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	lastVideo := time.Duration(-1)
+	for time.Now().Before(deadline) {
+		e.Frame(time.Now())
+		s := e.Stat(time.Now())
+		if s.Video != lastVideo {
+			lastVideo = s.Video
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	s := e.Stat(time.Now())
+	if s.Video < 2300*time.Millisecond {
+		t.Fatalf("picture at %v after the playhead jumped to 2.8s", s.Video)
+	}
+	t.Logf("after a jump to 2.8s the picture stands at %v", s.Video)
 }

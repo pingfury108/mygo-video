@@ -123,6 +123,17 @@ func (p *Decoder) FPS() float64 { return float64(C.dec_fps(&p.d)) }
 // becomes seconds when multiplied by it.
 func (p *Decoder) Timebase() float64 { return float64(C.dec_tb(&p.d)) }
 
+// Skip asks the decoder to pass over the pictures that are not reference
+// frames, which a playhead far behind the sound uses to catch up fast.
+func (p *Decoder) Skip(on bool) { C.dec_skip(&p.d, C.int(boolToInt(on))) }
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // Duration is how long the video is.
 func (p *Decoder) Duration() time.Duration {
 	return time.Duration(int64(C.dec_duration_us(&p.d))) * time.Microsecond

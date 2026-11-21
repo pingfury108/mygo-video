@@ -158,20 +158,38 @@ static double dec_tb(Dec *d) {
 static int dec_width(Dec *d)  { return d->par ? d->par->width : 0; }
 static int dec_height(Dec *d) { return d->par ? d->par->height : 0; }
 
+// dec_skip asks the decoder to pass over the pictures that are not reference
+// frames, which a playhead far behind the sound uses to catch up at many
+// times the speed of decoding every frame.
+static void dec_skip(Dec *d, int on) {
+	if (!d->dec) return;
+	EnterCriticalSection(&d->cs);
+	d->dec->skip_frame = on ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
+	LeaveCriticalSection(&d->cs);
+}
+
 // dec_picture converts the picture last decoded into the BGRA texture the
 // renderer reads, and returns its NT handle and the texture's size.
 static int dec_picture(Dec *d, uintptr_t *handle, int *w, int *h) {
-	if (!d->lastTex) return -1;
+	EnterCriticalSection(&d->cs);
+	if (!d->lastTex) {
+		LeaveCriticalSection(&d->cs);
+		return -1;
+	}
 	if (!d->convReady) {
 		AVHWDeviceContext *dc = (AVHWDeviceContext *)d->hw->data;
 		AVD3D11VADeviceContext *hw = (AVD3D11VADeviceContext *)dc->hwctx;
 		int rc = conv_init(&d->conv, hw->device, hw->device_context,
 			(UINT)d->par->width, (UINT)d->par->height);
-		if (rc) return rc;
+		if (rc) {
+			LeaveCriticalSection(&d->cs);
+			return rc;
+		}
 		d->convReady = 1;
 	}
 	HANDLE hnd = NULL;
 	int rc = conv_blit(&d->conv, (ID3D11Texture2D *)d->lastTex, d->lastIndex, &hnd);
+	LeaveCriticalSection(&d->cs);
 	if (rc) return rc;
 	*handle = (uintptr_t)hnd;
 	*w = (int)d->conv.w;

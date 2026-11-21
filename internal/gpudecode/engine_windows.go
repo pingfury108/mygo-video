@@ -50,6 +50,8 @@ func (w *winFrames) Seek(d time.Duration) error {
 	w.anchor = nil
 	return w.d.Seek(d)
 }
+
+func (w *winFrames) SetSkip(on bool)        { w.d.Skip(on) }
 func (w winFrames) Duration() time.Duration { return w.d.Duration() }
 func (w winFrames) Size() (int, int)        { return w.d.Size() }
 func (w winFrames) Close() error            { return w.d.Close() }

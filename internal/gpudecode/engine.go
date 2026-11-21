@@ -35,6 +35,10 @@ type frames interface {
 	Duration() time.Duration
 	// Size is the picture's size in pixels.
 	Size() (int, int)
+	// SetSkip asks the decoder to pass over the pictures that are not
+	// reference frames, which a playhead far behind the sound uses to catch
+	// up fast.
+	SetSkip(on bool)
 	// Close releases the decoder.
 	Close() error
 }
@@ -75,6 +79,7 @@ type Engine struct {
 	last     time.Duration // where the picture last shown stood
 	ended    bool
 	stopped  bool
+	skipping bool // the decoder is passing non-reference frames to catch up
 }
 
 // queued is a picture and where it shows.
@@ -137,7 +142,20 @@ func (e *Engine) runSound() {
 	}
 }
 
-// fill decodes ahead of the playhead, waking the window as each picture comes.
+const (
+	// lagSkip is how far the playhead may fall behind the newest ready
+	// picture before the decoder passes over the frames that are not
+	// reference ones, to catch up at many times the speed of decoding
+	// every one of them. lagJump is where a jump to the newest picture
+	// beats catching up frame by frame.
+	lagSkip = 600 * time.Millisecond
+	lagJump = 2500 * time.Millisecond
+)
+
+// fill keeps the queue stocked and the decoder's skip on the beat of the
+// playhead: behind by over half a second it passes the pictures that are
+// not reference ones, over two and a half seconds it jumps, and caught up
+// it decodes everything again.
 func (e *Engine) fill() {
 	defer e.wg.Done()
 	defer func() {
@@ -194,6 +212,31 @@ func (e *Engine) fill() {
 			return
 		}
 		e.mu.Lock()
+		// The playhead ran past everything ready by a wide margin: a jump
+		// stands on the newest picture now, rather than flashing through
+		// every one of the ones it passed.
+		lag := e.posLocked(time.Now()) - (e.base + off)
+		if lag > lagJump {
+			e.queue = nil
+			e.current = pic
+			e.last = e.base + off
+			e.mu.Unlock()
+			e.wakeNow()
+			// Stand on this picture for its step: without the pause the loop
+			// spins for the lock and starves the window and the sound.
+			time.Sleep(step)
+			continue
+		}
+		skip := lag > lagSkip
+		if e.skipping && lag < lagSkip/2 {
+			skip = false // a margin, so the switch does not flicker at the edge
+		}
+		if skip != e.skipping {
+			e.skipping = skip
+			e.mu.Unlock()
+			src.SetSkip(skip)
+			e.mu.Lock()
+		}
 		e.queue = append(e.queue, queued{at: e.base + off, pic: pic})
 		e.state = ui.VideoReady
 		wk := e.wake
@@ -201,6 +244,16 @@ func (e *Engine) fill() {
 		if wk != nil {
 			wk()
 		}
+	}
+}
+
+// wakeNow is wake on a thread that may not hold the lock.
+func (e *Engine) wakeNow() {
+	e.mu.Lock()
+	wake := e.wake
+	e.mu.Unlock()
+	if wake != nil {
+		wake()
 	}
 }
 
@@ -220,7 +273,7 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	if len(e.queue) == 0 {
 		return e.current, false, e.current.Surface != nil
 	}
-	pos := e.posAt(t)
+	pos := e.posLocked(t)
 	// Drop every picture the playhead passed, keeping the one showing.
 	for len(e.queue) > 1 && e.queue[1].at <= pos {
 		e.queue = e.queue[1:]
@@ -246,6 +299,13 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 // clock, even before it moves. The wall clock only stands in where no sound
 // plays, as a video without a track.
 func (e *Engine) posAt(t time.Time) time.Duration {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.posLocked(t)
+}
+
+// posLocked is posAt for a thread that already holds the lock.
+func (e *Engine) posLocked(t time.Time) time.Duration {
 	pos := e.at
 	if e.paused {
 		return pos
