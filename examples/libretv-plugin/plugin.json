@@ -7,24 +7,7 @@
   "description": "聚合搜索十三个 CMS 采集站，m3u8 直连播放。自部署自用。",
   "playback": "stream",
   "permissions": {
-    "network": [
-      "tv.pingfury.top",
-      "movie.douban.com",
-      "*.doubanio.com",
-      "caiji.dyttzyapi.com",
-      "cj.rycjapi.com",
-      "bfzyapi.com",
-      "ffzy5.tv",
-      "360zy.com",
-      "www.iqiyizyapi.com",
-      "jszyapi.com",
-      "dbzy.tv",
-      "www.mdzyapi.com",
-      "api.zuidapi.com",
-      "m3u8.apiyhzy.com",
-      "ikunzyapi.com",
-      "cj.lziapi.com"
-    ],
+    "network": ["*"],
     "streamHosts": ["*"]
   }
 }

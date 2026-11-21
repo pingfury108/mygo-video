@@ -222,6 +222,18 @@ export async function home() {
       if (v.length) out.push({ title: "豆瓣热门剧集", videos: v });
     }),
   ]);
+  // Douban down: the page would stand empty, so a couple of the sources'
+  // own answers for the usual words stand in.
+  if (out.length === 0) {
+    const SOURCES = await loadSources();
+    await Promise.allSettled(
+      ["电影", "电视剧"].map((word, i) =>
+        searchOne(SOURCES[i % SOURCES.length], word, 1).then((v) => {
+          if (v.length) out.push({ title: word, videos: v.slice(0, 12) });
+        })
+      )
+    );
+  }
   return { title: "LibreTV", sections: out };
 }
 
@@ -291,7 +303,7 @@ export async function play({ id }) {
   const { key } = decodeId(id);
   if (key === "douban") {
     const parts = String(id || "").split("|");
-    const name = decodeURIComponent(parts.slice(2).join("|") || "");
+    const name = decodeURIComponent(parts[2] || "");
     if (!name) throw new Error("这个条目没有名字");
     const sr = await search({ query: name, offset: 0 });
     if (!sr.videos.length) throw new Error("各源都没有「" + name + "」");
