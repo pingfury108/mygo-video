@@ -83,6 +83,9 @@ type Engine struct {
 	clock    time.Time     // when playback began, zero while paused
 	paused   bool
 	rate     float64
+	// sndSeek is a seek for the thread that owns the device to make: the
+	// call reads the source and must not hold the window.
+	sndSeek *time.Duration
 	// syncLoggedAt is when the sync was last written down, once a second.
 	syncLoggedAt time.Time
 	state        ui.VideoState
@@ -133,13 +136,34 @@ func (e *Engine) runSound() {
 	// The sound's calls reach WASAPI, whose apartment belongs to a thread:
 	// the thread is pinned and given one of its own here.
 	lockSoundThread()
+	// The sound waits for the picture to have something to show: started
+	// first, it ran through the first frames of the film while the decoder
+	// was still filling up, and a playback began a third of a second apart.
+	for i := 0; i < 100; i++ {
+		e.mu.Lock()
+		n, stopped := len(e.queue), e.stopped
+		e.mu.Unlock()
+		if n >= 3 || stopped {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	e.snd.Play()
 	for {
 		e.mu.Lock()
 		stopped, paused := e.stopped, e.paused
+		seekReq := e.sndSeek
+		e.sndSeek = nil
 		e.mu.Unlock()
 		if stopped {
 			return
+		}
+		// The sound is sought here, on its own thread: the seek reads the
+		// source over the network, and a window waiting for that would stop
+		// drawing for as long as it took.
+		if seekReq != nil {
+			e.snd.Seek(*seekReq)
+			continue
 		}
 		if paused {
 			e.snd.Pause()
@@ -158,8 +182,18 @@ func (e *Engine) runSound() {
 		// the device moves: at the end it reports nothing written, and the
 		// playhead would fall back to zero instead of marking the end.
 		if n > 0 {
+			// The call crosses into WASAPI, so it is made outside the lock:
+			// a device that waits for its buffer, or one that is being
+			// switched, would otherwise hold the engine with it, and the
+			// window would stop drawing frames.
+			p := e.snd.Position()
 			e.mu.Lock()
-			e.audioPos = e.snd.Position()
+			// Not once the playback is paused: the place it stopped at is the
+			// last the device reported, and a read that lands after the pause
+			// would move the picture on past where it stands.
+			if !e.paused {
+				e.audioPos = p
+			}
 			e.mu.Unlock()
 		}
 		// The sound ran out, the picture has not: note the moment, and the
@@ -327,11 +361,16 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 		return e.current, false, e.current.Surface != nil
 	}
 	pos := e.posLocked(t)
-	if t.Sub(e.syncLoggedAt) >= time.Second && e.current.Surface != nil {
+	if t.Sub(e.syncLoggedAt) >= 250*time.Millisecond && e.current.Surface != nil {
 		e.syncLoggedAt = t
-		line = fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms queue=%2d skipped=%v rate=%v ended=%v",
-			pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(),
-			len(e.queue), e.skipping, e.rate, e.ended)
+		q0, qn := time.Duration(-1), time.Duration(-1)
+		if len(e.queue) > 0 {
+			q0 = e.queue[0].at
+			qn = e.queue[len(e.queue)-1].at
+		}
+		line = fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
+			pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(), len(e.queue),
+			q0.String(), qn.String(), e.skipping, e.rate, e.ended)
 	}
 	// Drop every picture the playhead passed, keeping the one showing.
 	for len(e.queue) > 1 && e.queue[1].at <= pos {
@@ -370,21 +409,26 @@ func (e *Engine) Sync() (video, audio time.Duration, ok bool) {
 // the sound's position, which is the clock, even before it moves. The wall
 // clock only stands in where no sound plays, as a video without a track.
 func (e *Engine) posLocked(t time.Time) time.Duration {
-	pos := e.at
+	// What the sound has played of this place, which is added to every way
+	// the playhead can move.
+	pos := e.at + e.audioPos
 	if e.paused {
 		return pos
 	}
-	if e.snd != nil && e.audioEndedAt.IsZero() {
-		// Before the device moves, its position is 0: the picture waits there
-		// for it, rather than running ahead on the wall clock.
-		return pos + e.audioPos
+	if e.snd == nil {
+		if e.clock.IsZero() {
+			return pos
+		}
+		return pos + time.Duration(float64(t.Sub(e.clock))*e.rate)
 	}
-	if e.snd != nil {
-		// The sound is over, the picture is not: it goes on by the wall
-		// clock, from where the sound left it.
-		return pos + e.audioPos + time.Duration(float64(t.Sub(e.audioEndedAt))*e.rate)
+	// Before the device moves, its position is 0: the picture waits there
+	// for it, rather than running ahead on the wall clock.
+	if e.audioEndedAt.IsZero() {
+		return pos
 	}
-	return pos + time.Duration(float64(t.Sub(e.clock))*e.rate)
+	// The sound is over, the picture is not: it goes on by the wall clock,
+	// from where the sound left it.
+	return pos + time.Duration(float64(t.Sub(e.audioEndedAt))*e.rate)
 }
 
 // Interval is 0: each picture wakes the window as it comes due, which keeps the
@@ -435,8 +479,21 @@ func (e *Engine) Play() {
 func (e *Engine) Pause() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if !e.paused && !e.clock.IsZero() {
-		e.at += time.Duration(float64(time.Since(e.clock)) * e.rate)
+	if e.paused {
+		return
+	}
+	// Only while the wall clock carries the playhead is there anything to
+	// fold in: the sound's position is a place already played, and adding
+	// the time since the playback began to it counts that time twice, which
+	// put the playhead past the end of the film and started the next one.
+	if e.snd == nil {
+		if !e.clock.IsZero() {
+			e.at += time.Duration(float64(time.Since(e.clock)) * e.rate)
+			e.clock = time.Time{}
+		}
+	} else if !e.audioEndedAt.IsZero() {
+		e.audioPos += time.Duration(float64(time.Since(e.audioEndedAt)) * e.rate)
+		e.audioEndedAt = time.Time{}
 	}
 	e.paused = true
 }
@@ -455,10 +512,10 @@ func (e *Engine) Seek(d time.Duration) {
 	e.audioEndedAt = time.Time{}
 	e.current = ui.VideoPicture{}
 	src, snd := e.src, e.snd
-	e.mu.Unlock()
 	if snd != nil {
-		snd.Seek(d)
+		e.sndSeek = &d
 	}
+	e.mu.Unlock()
 	if src != nil {
 		go func() {
 			_ = src.Seek(d)

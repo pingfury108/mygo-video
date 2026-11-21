@@ -441,3 +441,34 @@ func TestPositionAnswersWhilePlaying(t *testing.T) {
 		t.Fatal("Position never answered: a lock taken twice")
 	}
 }
+
+// TestPauseKeepsThePlaceItStopped is the pause after a playback: the place must
+// stay where the picture stopped, not count the time already played a second
+// time, which put the playhead past the end of the film and began the next one
+// while the sound of this one still played.
+func TestPauseKeepsThePlaceItStopped(t *testing.T) {
+	src := &fakeFrames{step: 40 * time.Millisecond}
+	snd := &fakeClock{rate: 1}
+	e := newEngine(src, snd)
+	defer e.Close()
+	e.Play()
+	time.Sleep(300 * time.Millisecond)
+
+	before := e.Position()
+	e.Pause()
+	paused := e.Position()
+	if paused > before+100*time.Millisecond {
+		t.Fatalf("paused at %v, after playing %v: the time was counted twice", paused, before)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if after := e.Position(); after != paused {
+		t.Fatalf("playhead moved from %v to %v while paused", paused, after)
+	}
+	t.Logf("paused at %v after %v of playback", paused, before)
+
+	e.Play()
+	time.Sleep(200 * time.Millisecond)
+	if resumed := e.Position(); resumed <= paused {
+		t.Fatalf("playhead stood at %v after resuming", resumed)
+	}
+}
