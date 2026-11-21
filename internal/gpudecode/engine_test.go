@@ -67,6 +67,7 @@ type fakeClock struct {
 	rate  float64
 	start time.Time
 	base  time.Duration
+	ended bool
 }
 
 func (c *fakeClock) Position() time.Duration {
@@ -105,6 +106,14 @@ func (c *fakeClock) Pause() {
 	c.mu.Unlock()
 }
 func (c *fakeClock) Close() {}
+
+// done is where a test makes the sound run out, as a film whose closing
+// titles outlast its last sound does.
+func (c *fakeClock) Done() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ended
+}
 
 // TestPictureFollowsSound is the check of the sync: with the sound at 1x, the
 // picture shown stands where the sound does.
@@ -347,4 +356,33 @@ func TestHugeLagJumpsToNewest(t *testing.T) {
 		t.Fatalf("picture at %v after the playhead jumped to 2.8s", s.Video)
 	}
 	t.Logf("after a jump to 2.8s the picture stands at %v", s.Video)
+}
+
+// TestPictureOutlastsTheSound is the film whose closing titles run past its
+// last sound: the sound stops, and the picture must go on to its own end
+// rather than freezing at the last of it.
+func TestPictureOutlastsTheSound(t *testing.T) {
+	src := &fakeFrames{step: 40 * time.Millisecond}
+	snd := &fakeClock{rate: 1}
+	e := newEngine(src, snd)
+	defer e.Close()
+	e.Play()
+
+	time.Sleep(400 * time.Millisecond)
+	// The sound runs out where it stands, and the picture has seconds of
+	// its own left.
+	snd.mu.Lock()
+	snd.ended = true
+	snd.mu.Unlock()
+	at := e.Stat(time.Now())
+	time.Sleep(600 * time.Millisecond)
+	for i := 0; i < 5; i++ {
+		e.Frame(time.Now())
+		time.Sleep(5 * time.Millisecond)
+	}
+	s := e.Stat(time.Now())
+	if got := s.Video - at.Video; got < 300*time.Millisecond {
+		t.Fatalf("picture moved %v after the sound ran out at %v", got, at.Video)
+	}
+	t.Logf("sound ended at %v, picture went on to %v", at.Video, s.Video)
 }

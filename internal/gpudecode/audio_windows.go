@@ -61,6 +61,10 @@ func (p *Audio) Close() {
 	C.audio_close(&p.a)
 }
 
+// Ended says the sound of the file is over: a picture that outlasts it goes
+// on by the wall clock rather than freezing at the last of the sound.
+func (p *Audio) Ended() bool { return C.audio_ended(&p.a) != 0 }
+
 // Seek goes to d in the sound, which the device plays from there.
 func (p *Audio) Seek(d time.Duration) int {
 	return int(C.audio_seek(&p.a, C.int64_t(d.Microseconds())))

@@ -54,6 +54,10 @@ type clock interface {
 	Fill() int
 	Play()
 	Pause()
+	// Done says the sound of the file is over, which the picture may
+	// outlast: it goes on by the wall clock, rather than freezing at the
+	// last of the sound.
+	Done() bool
 	Close()
 }
 
@@ -80,6 +84,10 @@ type Engine struct {
 	ended    bool
 	stopped  bool
 	skipping bool // the decoder is passing non-reference frames to catch up
+	// audioEndedAt is when the sound ran out, zero while it plays: the
+	// picture goes on by the wall clock from there, for a film whose
+	// closing titles outlast its last sound.
+	audioEndedAt time.Time
 }
 
 // queued is a picture and where it shows.
@@ -137,6 +145,15 @@ func (e *Engine) runSound() {
 		if n > 0 {
 			e.mu.Lock()
 			e.audioPos = e.snd.Position()
+			e.mu.Unlock()
+		}
+		// The sound ran out, the picture has not: note the moment, and the
+		// playhead carries the picture on by the wall clock from there.
+		if e.snd.Done() {
+			e.mu.Lock()
+			if e.audioEndedAt.IsZero() {
+				e.audioEndedAt = time.Now()
+			}
 			e.mu.Unlock()
 		}
 	}
@@ -310,10 +327,15 @@ func (e *Engine) posLocked(t time.Time) time.Duration {
 	if e.paused {
 		return pos
 	}
-	if e.snd != nil {
+	if e.snd != nil && e.audioEndedAt.IsZero() {
 		// Before the device moves, its position is 0: the picture waits there
 		// for it, rather than running ahead on the wall clock.
 		return pos + e.audioPos
+	}
+	if e.snd != nil {
+		// The sound is over, the picture is not: it goes on by the wall
+		// clock, from where the sound left it.
+		return pos + e.audioPos + time.Duration(float64(t.Sub(e.audioEndedAt))*e.rate)
 	}
 	return pos + time.Duration(float64(t.Sub(e.clock))*e.rate)
 }
@@ -383,6 +405,7 @@ func (e *Engine) Seek(d time.Duration) {
 	e.ended = false
 	e.state = ui.VideoLoading
 	e.audioPos = 0
+	e.audioEndedAt = time.Time{}
 	e.current = ui.VideoPicture{}
 	src, snd := e.src, e.snd
 	e.mu.Unlock()

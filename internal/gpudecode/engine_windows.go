@@ -70,6 +70,7 @@ func (w winAudio) Seek(d time.Duration) int { return w.a.Seek(d) }
 func (w winAudio) Fill() int                { return w.a.Fill() }
 func (w winAudio) Play()                    { w.a.Play() }
 func (w winAudio) Pause()                   { w.a.Pause() }
+func (w winAudio) Done() bool               { return w.a.Ended() }
 func (w winAudio) Close()                   { w.a.Close() }
 
 // NewEngine reads url and plays it on the GPU. The read happens apart, so the

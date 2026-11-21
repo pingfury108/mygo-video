@@ -33,6 +33,7 @@ typedef struct {
 	int                 bytes; // a frame of all channels
 	HANDLE              event;
 	int                 started;
+	int                 eof;    // the sound of the file is over
 
 	// pcm is what swr made of the audio frame last decoded, and left of it
 	// how many frames are yet to play.
@@ -57,6 +58,12 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	avformat_network_init();
 	AVDictionary *opts = NULL;
 	if (headers && headers[0]) av_dict_set(&opts, "headers", headers, 0);
+	// A deeper read-ahead, and reconnects, for a source that stalls: the
+	// default 32KB the avio buffer holds would put every hiccup of the
+	// network straight onto the decoder.
+	av_dict_set(&opts, "buffer_size", "524288", 0);
+	av_dict_set(&opts, "reconnect_streamed", "1", 0);
+	av_dict_set(&opts, "reconnect_delay_max", "4", 0);
 	if (avformat_open_input(&a->fmt, url, NULL, &opts) < 0) return -1;
 	av_dict_free(&opts);
 	if (avformat_find_stream_info(a->fmt, NULL) < 0) return -2;
@@ -152,7 +159,10 @@ static int audio_decode(Audio *a) {
 			if (n > 0) return n;
 			continue;
 		}
-		if (r == AVERROR_EOF) return 0;
+		if (r == AVERROR_EOF) {
+			a->eof = 1;
+			return 0;
+		}
 		if (r != AVERROR(EAGAIN)) return -23;
 		if (av_read_frame(a->fmt, a->pkt) < 0) {
 			avcodec_send_packet(a->dec, NULL);
@@ -226,6 +236,11 @@ static int64_t audio_position(Audio *a) {
 	return (int64_t)(played * 1000000ULL / (UINT64)a->rate);
 }
 
+// audio_ended says the sound of the file is over, which the picture may
+// outlast: a film whose closing titles run past its last sound is the usual
+// case, and one where the picture would freeze at the last of it.
+static int audio_ended(Audio *a) { return a->eof; }
+
 static void audio_close(Audio *a) {
 	if (a->client) a->client->lpVtbl->Stop(a->client);
 	if (a->render) a->render->lpVtbl->Release(a->render);
@@ -256,6 +271,7 @@ static int audio_seek(Audio *a, int64_t us) {
 	}
 	a->written = 0;
 	a->started = 0;
+	a->eof = 0;
 	return 0;
 }
 

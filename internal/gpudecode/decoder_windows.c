@@ -72,6 +72,12 @@ static int dec_open(Dec *d, const char *url, const char *headers) {
 	InitializeCriticalSection(&d->cs);
 	AVDictionary *opts = NULL;
 	if (headers && headers[0]) av_dict_set(&opts, "headers", headers, 0);
+	// A deeper read-ahead, and reconnects, for a source that stalls: the
+	// default 32KB the avio buffer holds would put every hiccup of the
+	// network straight onto the decoder.
+	av_dict_set(&opts, "buffer_size", "524288", 0);
+	av_dict_set(&opts, "reconnect_streamed", "1", 0);
+	av_dict_set(&opts, "reconnect_delay_max", "4", 0);
 	int r = avformat_open_input(&d->fmt, url, NULL, &opts);
 	av_dict_free(&opts);
 	if (r < 0) {
