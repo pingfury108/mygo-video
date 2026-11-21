@@ -615,6 +615,13 @@ func (e *Engine) leadLocked() time.Duration {
 			syncLog(fmt.Sprintf("DESYNC picture=%.3f pos=%.3f corr=%.3f", e.last.Seconds(), pos.Seconds(), e.syncErr.Seconds()))
 		}
 	}
+	// The correction cannot push the account below zero: a picture shown
+	// stands until its step is spent whatever the correction says, and a
+	// negative account would only hold the next picture back past the
+	// moment the last one ended.
+	if e.syncErr < 0 {
+		e.syncErr = 0
+	}
 	if pos > e.last {
 		if left := step - (pos - e.last); left > 0 {
 			return left + e.syncErr
