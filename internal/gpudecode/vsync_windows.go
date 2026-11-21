@@ -2,7 +2,11 @@
 
 package gpudecode
 
-import "syscall"
+import (
+	"sync"
+	"syscall"
+	"time"
+)
 
 // The system's clock ticks 64 times a second unless asked otherwise: a timer
 // comes no finer than that, so a window asking for a frame every 16.7ms is
@@ -28,9 +32,40 @@ func init() {
 // to within a millisecond or two, and that is what the presents drift by.
 var dwmFlush = syscall.NewLazyDLL("dwmapi.dll").NewProc("DwmFlush")
 
-// waitVsync returns just after the compositor drew a frame.
-func waitVsync() {
-	if dwmFlush.Find() == nil {
+// The compositor's own period, measured once: a desktop sent over a remote
+// session composes at 32Hz whatever the display reports, and waiting on that
+// refresh costs a picture more than it lines it up.
+var (
+	composeOnce sync.Once
+	composeStep time.Duration
+)
+
+// composePeriod measures the compositor's refresh by waiting on it a few times,
+// 0 when it cannot be waited on.
+func composePeriod() time.Duration {
+	composeOnce.Do(func() {
+		if dwmFlush.Find() != nil {
+			return
+		}
 		dwmFlush.Call()
+		var sum time.Duration
+		for i := 0; i < 6; i++ {
+			start := time.Now()
+			dwmFlush.Call()
+			sum += time.Since(start)
+		}
+		composeStep = sum / 6
+	})
+	return composeStep
+}
+
+// waitVsync returns just after the compositor drew a frame, where the
+// compositor keeps the display's pace: a remote session composes at 32Hz, and
+// waiting for that only holds a picture back.
+func waitVsync() {
+	step := composePeriod()
+	if step == 0 || step > 25*time.Millisecond {
+		return
 	}
+	dwmFlush.Call()
 }

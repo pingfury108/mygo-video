@@ -552,10 +552,15 @@ func (e *Engine) tracing() bool {
 
 // leadLocked is how far ahead of the clock a picture is handed over: the
 // window is woken just after a refresh, draws, and the present waits for the
-// refresh that follows, which is one refresh away. 16ms covers a 60Hz display
-// and stands a little short of a 50Hz one, which is nearer than guessing far.
+// refresh that follows, which is one refresh away. A desktop that composes
+// slower than that, as one sent over a remote session does at 32Hz, cannot be
+// lined up at all, and the lead stays at a display's own refresh.
 func (e *Engine) leadLocked() time.Duration {
-	return 16*time.Millisecond + e.avOffset()
+	lead := 16 * time.Millisecond
+	if step := composePeriod(); step > 8*time.Millisecond && step <= 25*time.Millisecond {
+		lead = step
+	}
+	return lead + e.avOffset()
 }
 
 // syncLine reports the playhead against the picture the screen now shows,
