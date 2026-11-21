@@ -102,6 +102,9 @@ type Engine struct {
 	avShift  time.Duration
 	avReadAt time.Time
 	avFixed  bool // set by SetAVOffset, which the file no longer overrides
+	// step is how long a picture of the video shows, kept from the decoder
+	// for the lead a picture is handed over with.
+	step time.Duration
 	// traceOn says a file asks for every picture to be written down, and
 	// traceAt when that was last checked; traceLast is the last written.
 	traceOn   bool
@@ -375,6 +378,7 @@ func (e *Engine) fill() {
 		}
 		e.queue = append(e.queue, queued{at: e.base + off, pic: pic})
 		e.state = ui.VideoReady
+		e.step = step
 		wk := e.wake
 		e.mu.Unlock()
 		if wk != nil {
@@ -550,17 +554,19 @@ func (e *Engine) tracing() bool {
 	return e.traceOn
 }
 
-// leadLocked is how far ahead of the clock a picture is handed over: the
-// window is woken just after a refresh, draws, and the present waits for the
-// refresh that follows, which is one refresh away. A desktop that composes
-// slower than that, as one sent over a remote session does at 32Hz, cannot be
-// lined up at all, and the lead stays at a display's own refresh.
+// leadLocked is how far ahead of the clock a picture is handed over, and it
+// has two parts. One is the wait from handing it over to it being seen: the
+// window draws it and the present takes a refresh, 16ms at 60Hz. The other is
+// what choosing among pictures costs: they stand a step apart, and the one
+// picked for a moment is on average half a step early, so the picture trails
+// the sound by that much. mpv does not pay it, as its vo waits on the clock
+// itself; a window that asks for a picture when it draws does.
 func (e *Engine) leadLocked() time.Duration {
-	lead := 16 * time.Millisecond
-	if step := composePeriod(); step > 8*time.Millisecond && step <= 25*time.Millisecond {
-		lead = step
+	step := e.step
+	if step <= 0 {
+		step = 40 * time.Millisecond
 	}
-	return lead + e.avOffset()
+	return 16*time.Millisecond + step/2 + e.avOffset()
 }
 
 // syncLine reports the playhead against the picture the screen now shows,
