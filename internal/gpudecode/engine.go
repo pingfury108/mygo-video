@@ -109,12 +109,6 @@ type Engine struct {
 	// for the lead a shown picture holds the screen for.
 	step     time.Duration
 	sndDelay time.Duration
-	// syncErr is the correction mpv's adjust_sync keeps: a tenth of the
-	// error between the picture and the playhead, taken each quarter second
-	// and bounded by a quarter step, so a clock that runs a little off is
-	// followed without ever being jumped.
-	syncErr   time.Duration
-	syncErrAt time.Time
 	// traceOn says a file asks for every picture to be written down, and
 	// traceAt when that was last checked; traceLast is the last written.
 	traceOn   bool
@@ -301,35 +295,12 @@ func (e *Engine) fill() {
 			ahead = 12
 		}
 		if queueLen >= ahead || paused || src == nil {
+			// The window schedules itself at the moment each picture comes due
+			// (Interval), so this holds only a slow keep-alive: one wake a
+			// second, in case a schedule was lost, as the first pictures still
+			// wake it from below.
 			if wake != nil {
-				// Woken when the picture on top of the queue is due, not
-				// every half step: woken sooner, the window draws the same
-				// picture again at a moment of its own, and the pictures
-				// reach the screen at times that jump about — 23ms, 42ms,
-				// 64ms between them where a 25fps film steps every 40 —
-				// which is heard as the picture running with the sound and
-				// against it by turns.
-				wait := step / 2
-				e.mu.Lock()
-				if len(e.queue) > 0 && !paused {
-					// A picture already due is woken for at once; one that is
-					// not is woken for when the playhead reaches its own time
-					// — the same moment Frame shows it at.
-					wait = 0
-					if due := e.queue[0].at - e.posLocked(time.Now()); due > 0 {
-						wait = due
-					}
-				}
-				e.mu.Unlock()
-				if wait > 0 {
-					time.Sleep(wait)
-				}
-				// Lined up with the compositor's refresh before the window is
-				// asked to draw: handed over at a moment of its own, the
-				// picture waited for whichever refresh came next, and the
-				// presents landed 31ms and 61ms apart where the film steps
-				// every 40.
-				waitVsync()
+				time.Sleep(time.Second)
 				wake()
 			} else {
 				time.Sleep(50 * time.Millisecond)
@@ -585,54 +556,17 @@ func (e *Engine) leadLocked() time.Duration {
 	if step <= 0 {
 		step = 40 * time.Millisecond
 	}
-	// mpv corrects the account it keeps against where the sound really is:
-	// every frame it shows, the playhead the device reports is compared with
-	// the frame's own time, and a tenth of the difference goes onto the
-	// account (video.c: adjust_sync, change = av_delay * 0.1). Without it a
-	// clock that lies a little lies forever, and the picture stands by it.
-	now := time.Now()
-	pos := e.posLocked(now)
-	if e.syncErrAt.IsZero() {
-		e.syncErrAt = now
-		return 0
+	// The lead is what a present takes: a frame handed over now reaches the
+	// screen at the compositor's next draw, which is on average half its
+	// period away, and a little past that for the drawing. Measured where it
+	// can be (composePeriod), a display's own where it cannot. mpv presents
+	// its vo's frames half a vsync ahead of their vsync for the same reason
+	// (vo.c: target = due - vsync_interval*(1+lead)/2).
+	lead := composePeriod()/2 + 2*time.Millisecond
+	if lead < step/8 {
+		lead = step / 8
 	}
-	if d := now.Sub(e.syncErrAt); d >= 250*time.Millisecond {
-		// How far the picture on screen stands from the playhead, which is
-		// the error to correct. A picture behind the sound goes up too soon
-		// and wants holding; one ahead wants letting through sooner. mpv
-		// lays a tenth of a_pts - v_pts onto its account each frame, and
-		// the account is what the next frame is due against: a positive
-		// account holds it, a negative one calls it early.
-		err := (e.last - pos) / 10
-		lim := step / 4
-		if err > lim {
-			err = lim
-		}
-		if err < -lim {
-			err = -lim
-		}
-		e.syncErr += err
-		// The account stands for what the picture on screen has yet to
-		// show: below zero it would call a picture before the one showing
-		// has ended, and above a step it would hold one past its moment.
-		if e.syncErr < -step/8 {
-			e.syncErr = -step / 8
-		}
-		if e.syncErr > step/2 {
-			e.syncErr = step / 2
-		}
-		e.syncErrAt = now
-		if e.syncErr > 2*time.Second || e.syncErr < -2*time.Second {
-			syncLog(fmt.Sprintf("DESYNC picture=%.3f pos=%.3f corr=%.3f", e.last.Seconds(), pos.Seconds(), e.syncErr.Seconds()))
-		}
-	}
-	if pos > e.last {
-		if left := step - (pos - e.last); left > 0 {
-			return left + e.syncErr
-		}
-		return e.syncErr
-	}
-	return e.syncErr
+	return lead + e.avOffset()
 }
 
 // syncLine reports the playhead against the picture the screen now shows,
@@ -694,12 +628,29 @@ func (e *Engine) posLocked(t time.Time) time.Duration {
 	return pos + time.Duration(float64(t.Sub(e.audioEndedAt))*e.rate)
 }
 
-// Interval is the picture's own step, so the window asks for the next one on a
-// tick that belongs to the film rather than to when a wake happened to land:
-// asked for ad hoc, the presents fell 29ms, 66ms, 33ms, 63ms apart where the
-// film steps every 40, which is the picture running with the sound and against
-// it by turns. The wake still comes, for the first picture and for a seek.
-func (e *Engine) Interval() time.Duration { return e.stepOf() }
+// Interval is how long until the next picture comes due: the playhead's own
+// distance to it, less the lead a present takes. The window schedules its
+// next frame at exactly that (askNext: c.After(interval)), which is what
+// mpv's vo does with a frame's time — vo_is_ready_for_frame holds until the
+// pts, and a timer wakes it (wakeup_locked). Asked at a fixed step instead,
+// the window's own pace quantised the moment every picture went up by ±31ms,
+// and no choice of lead could take that out: the lead moved the average
+// while the quantisation kept the swing.
+func (e *Engine) Interval() time.Duration {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.queue) == 0 || e.ended {
+		return 40 * time.Millisecond
+	}
+	next := e.queue[0].at - e.posLocked(time.Now()) - e.leadLocked()
+	if next < time.Millisecond {
+		return time.Millisecond
+	}
+	if next > 200*time.Millisecond {
+		return 200 * time.Millisecond
+	}
+	return next
+}
 
 // State reports how loading and playing go.
 func (e *Engine) State() (ui.VideoState, error) {
@@ -779,10 +730,6 @@ func (e *Engine) Seek(d time.Duration) {
 	e.state = ui.VideoLoading
 	e.audioPos = 0
 	e.audioAt = time.Time{}
-	// A new place starts the correction over: the old place's error is not
-	// this one's.
-	e.syncErr = 0
-	e.syncErrAt = time.Time{}
 	e.audioEndedAt = time.Time{}
 	e.current = ui.VideoPicture{}
 	src, snd := e.src, e.snd
