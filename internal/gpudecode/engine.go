@@ -387,16 +387,17 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	// the window's next draw, so the one due now is the one for a little
 	// further on: without it the picture trails the sound by that draw.
 	// lead is how far ahead of the clock a picture is handed over: the
-	// window takes the picture it draws at its next frame, which is one of
-	// its own intervals away, and a picture due exactly now would go up
-	// that much after its time. Measured, not guessed: the window's frame
-	// interval is 21ms here, and 40ms of a guess overshot it.
-	lead := e.frameStep
+	// window draws at its own frames, and the picture waits on average half
+	// of that interval before one comes, not the whole of it. Measured, not
+	// guessed: this machine draws a 4K texture every 17ms, so a full
+	// interval of 17ms reached past the delay it was meant to cover, which
+	// the ear still heard as the sound a little late.
+	lead := e.frameStep / 2
 	if lead <= 0 {
-		lead = 16 * time.Millisecond
+		lead = 8 * time.Millisecond
 	}
-	if lead > 50*time.Millisecond {
-		lead = 50 * time.Millisecond
+	if lead > 25*time.Millisecond {
+		lead = 25 * time.Millisecond
 	}
 	iff := pos + lead
 	// Drop every picture the playhead passed, keeping the one showing.
@@ -431,7 +432,7 @@ func (e *Engine) syncLine(pos time.Duration) string {
 		q0, qn = e.queue[0].at, e.queue[len(e.queue)-1].at
 	}
 	return fmt.Sprintf("pos=%8.3fs picture=%8.3fs gap=%+6dms lead=%v ui=%v queue=%2d [%s..%s] skipped=%v rate=%v ended=%v",
-		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(), e.frameStep.Round(time.Millisecond),
+		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(), (e.frameStep / 2).Round(time.Millisecond),
 		e.frameStep.Round(time.Millisecond), len(e.queue),
 		q0.String(), qn.String(), e.skipping, e.rate, e.ended)
 }
