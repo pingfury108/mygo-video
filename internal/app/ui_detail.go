@@ -14,7 +14,8 @@ func (a *app) detailPage(c *ui.Context) {
 	it := a.current
 	prog, hasProg := a.store.Progress(it.ID)
 
-	ui.Row(c).Height(56).PaddingX(32).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
+	bar := a.dragWindow(headerRow(c, 32))
+	bar.Children(func() {
 		iconButton(c, iconBack, 16, "返回", func() {
 			if len(a.history) > 0 {
 				a.back()

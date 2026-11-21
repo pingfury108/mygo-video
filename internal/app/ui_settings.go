@@ -14,7 +14,8 @@ import (
 // plugins.
 func (a *app) settingsPage(c *ui.Context) {
 	p := colors()
-	ui.Row(c).Height(56).PaddingX(32).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
+	bar := a.dragWindow(headerRow(c, 32))
+	bar.Children(func() {
 		ui.Text(c, "设置").FontSize(15).FontWeight(600)
 		ui.Box(c).Grow(1)
 	})

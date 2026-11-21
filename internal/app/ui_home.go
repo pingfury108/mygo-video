@@ -11,7 +11,8 @@ func (a *app) homePage(c *ui.Context) {
 	p := colors()
 	a.loadPluginHome()
 	items := a.items()
-	ui.Row(c).Height(56).PaddingX(32).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
+	bar := a.dragWindow(headerRow(c, 32))
+	bar.Children(func() {
 		ui.Text(c, "首页").FontSize(15).FontWeight(600)
 		sub := a.sourceName()
 		if a.source == sourceIPTV {

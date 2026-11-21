@@ -11,7 +11,8 @@ import (
 // pluginsPage manages the plugins: which are on, and what they ask for.
 func (a *app) pluginsPage(c *ui.Context) {
 	p := colors()
-	ui.Row(c).Height(56).PaddingX(32).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
+	bar := a.dragWindow(headerRow(c, 32))
+	bar.Children(func() {
 		ui.Text(c, "插件").FontSize(15).FontWeight(600)
 		ui.Text(c, fmt.Sprintf("%d 个已启用 · 共 %d 个", a.enabledPlugins(), len(a.plugins))).
 			FontSize(12).TextColor(p.faint)

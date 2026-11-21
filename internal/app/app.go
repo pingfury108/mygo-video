@@ -230,9 +230,13 @@ type app struct {
 	seekDragging bool
 	seekDrag     bool
 	seekHold     bool
-	lastSave     time.Time
-	fresh        bool
-	ended        bool
+	// fullScreen follows the window: the pages draw their title bars from
+	// it, and a double click there leaves full screen where the frame has
+	// no buttons to leave it with.
+	fullScreen bool
+	lastSave   time.Time
+	fresh      bool
+	ended      bool
 
 	// quality is what to ask a plugin for, and playingQuality what it gave.
 	quality        string
@@ -1095,6 +1099,12 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 }
 
 func (a *app) leavePlayer() {
+	// A window left in full screen keeps a style that has no frame to drag or
+	// resize by, and the pages after the player have no button to leave it
+	// with: it goes back to a window as the player does.
+	if a.win != nil && a.win.IsFullScreen() {
+		a.win.SetFullScreen(false)
+	}
 	a.closePlayer()
 	a.seek = 0
 	a.drawer = false

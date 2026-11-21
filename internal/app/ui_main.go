@@ -24,12 +24,14 @@ func (a *app) view(c *ui.Context) {
 	if a.route == pagePlayer {
 		a.route = pageDetail
 	}
-	bar := c.TitleBar()
 	p := colors()
 	ui.Box(c).Fill().Children(func() {
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-			a.sidebar(c, bar)
-			ui.Column(c).Grow(1).Background(p.bg).Children(func() {
+			a.sidebar(c)
+			// The content keeps the bottom gap of the sidebar, so a row of
+			// posters stops where its nav does rather than running to the
+			// window's last pixel.
+			ui.Column(c).Grow(1).Padding(0, 0, 10, 0).Background(p.bg).Children(func() {
 				a.page(c)
 			})
 		})
@@ -51,6 +53,13 @@ func (a *app) windowButtons(c *ui.Context) {
 	ui.Row(c).Absolute().Top(0).Right(0).Height(38).Children(func() {
 		a.windowButton(c, iconMinimize, false, func() { a.win.Minimize() })
 		a.windowButton(c, iconMaximize, false, func() {
+			// Full screen hides this bar, but a page drawn over a window left
+			// in it shows one here: the button leaves full screen rather than
+			// stack a maximize on a frame that has no frame.
+			if a.fullScreen {
+				a.exitFullScreen()
+				return
+			}
 			if a.win.IsMaximized() {
 				a.win.Unmaximize()
 				return
@@ -100,15 +109,36 @@ func (a *app) page(c *ui.Context) {
 	}
 }
 
+// headerHeight is how tall a page's header stands, and how far down the
+// sidebar starts its rows: one line across the window, so the search and the
+// nav bar do not stand at heights of their own.
+func headerHeight(c *ui.Context) float32 {
+	h := c.TitleBar().Bottom + 10
+	if h < 44 {
+		h = 44
+	}
+	return h
+}
+
+// brandHeight is how tall the app's mark stands in the sidebar, the row a
+// page's header lines its own title up with.
+const brandHeight = 38
+
+// headerRow is the top bar of a page: its content sits in the band the app's
+// mark stands in beside it, so a page title and the mark share one line.
+func headerRow(c *ui.Context, gutter float32) ui.Element {
+	h := headerHeight(c)
+	return ui.Row(c).Height(h+brandHeight).
+		Padding(h, gutter, 0, gutter).AlignItems(ui.Center).Gap(10)
+}
+
 // sidebar is the app's navigation: the pages, what was watched last, and the
 // folders it reads.
-func (a *app) sidebar(c *ui.Context, bar ui.TitleBar) {
+func (a *app) sidebar(c *ui.Context) {
 	p := colors()
-	top := bar.Bottom + 10
-	if top < 44 {
-		top = 44
-	}
-	ui.Column(c).Width(232).Background(p.sidebar).Padding(0, 12, 10, 12).DragWindow().Children(func() {
+	top := headerHeight(c)
+	side := a.dragWindow(ui.Column(c).Width(232).Background(p.sidebar).Padding(0, 12, 10, 12))
+	side.Children(func() {
 		ui.Box(c).Height(top)
 		// The app's mark, as the Dock shows it, with the pages' arrows.
 		ui.Row(c).Gap(9).AlignItems(ui.Center).Padding(0, 9, 10, 9).Children(func() {

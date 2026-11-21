@@ -14,7 +14,8 @@ import (
 func (a *app) libraryPage(c *ui.Context) {
 	p := colors()
 	items := a.groupSeries(a.items())
-	ui.Row(c).Height(56).PaddingX(32).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
+	bar := a.dragWindow(headerRow(c, 32))
+	bar.Children(func() {
 		ui.Text(c, "片库").FontSize(15).FontWeight(600)
 		ui.Text(c, a.libraryLine()).FontSize(12).TextColor(p.faint)
 		ui.Box(c).Grow(1)
@@ -56,7 +57,8 @@ func (a *app) libraryPage(c *ui.Context) {
 // searchPage finds videos by name, series or episode.
 func (a *app) searchPage(c *ui.Context) {
 	p := colors()
-	ui.Row(c).Height(56).PaddingX(32).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
+	bar := a.dragWindow(headerRow(c, 32))
+	bar.Children(func() {
 		ui.Text(c, "搜索").FontSize(15).FontWeight(600)
 		ui.Box(c).Grow(1)
 	})

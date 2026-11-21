@@ -10,7 +10,8 @@ func (a *app) signInPage(c *ui.Context) {
 	if a.signInEntry != nil {
 		title = "登录 " + a.signInEntry.man.Name
 	}
-	ui.Row(c).Height(56).PaddingX(20).AlignItems(ui.Center).Gap(10).DragWindow().Children(func() {
+	bar := a.dragWindow(headerRow(c, 20))
+	bar.Children(func() {
 		ui.Text(c, title).FontSize(15).FontWeight(600)
 		ui.Text(c, "登录页由这个插件提供，MyGo Video 不看你的密码").FontSize(11.5).TextColor(p.faint)
 		ui.Box(c).Grow(1)

@@ -114,8 +114,8 @@ func (a *app) playerTop(c *ui.Context) {
 	padTop := c.TitleBar().Bottom + 8
 	// The page fills the window, the title bar included: a press on this bar
 	// drags the window, rather than pause the picture below it.
-	top := ui.Row(c).Absolute().Top(0).Left(0).Right(0).Height(padTop+56).
-		Padding(padTop, 20, 0, 20).Gap(12).DragWindow().
+	top := a.dragWindow(ui.Row(c).Absolute().Top(0).Left(0).Right(0).Height(padTop+56).
+		Padding(padTop, 20, 0, 20).Gap(12)).
 		AlignItems(ui.Center).Gradient(ui.RGBA(0, 0, 0, 0.72), ui.Transparent, 180).
 		Opacity(shown).IgnoreInput(a.uiHidden)
 	top.Children(func() {
@@ -562,9 +562,41 @@ func (a *app) cycleQuality() {
 }
 
 func (a *app) toggleFullScreen() {
-	if a.win != nil {
-		a.win.ToggleFullScreen()
+	if a.win == nil {
+		return
 	}
+	a.win.ToggleFullScreen()
+	a.fullScreen = a.win.IsFullScreen()
+}
+
+// exitFullScreen leaves full screen, for a click or a key that means to.
+func (a *app) exitFullScreen() {
+	if a.win == nil || !a.fullScreen {
+		return
+	}
+	a.win.SetFullScreen(false)
+	a.fullScreen = false
+}
+
+// dragWindow makes a bar move the window, and a double click on it do what a
+// double click on a title bar does: leave full screen where the window is in
+// it — a full screen frame hides its buttons, and the pages after the player
+// had no way out of one — or maximize and restore as usual.
+func (a *app) dragWindow(bar ui.Element) ui.Element {
+	bar = bar.DragWindow()
+	if !bar.WindowDoubleClicked() || a.win == nil {
+		return bar
+	}
+	if a.fullScreen {
+		a.exitFullScreen()
+		return bar
+	}
+	if a.win.IsMaximized() {
+		a.win.Unmaximize()
+	} else {
+		a.win.Maximize()
+	}
+	return bar
 }
 
 func rateLabel(r float64) string {
