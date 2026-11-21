@@ -94,6 +94,12 @@ type Engine struct {
 	// sndSeek is a seek for the thread that owns the device to make: the
 	// call reads the source and must not hold the window.
 	sndSeek *time.Duration
+	// starting is set from a seek until a picture of the new place is ready:
+	// the sound seeks at a frame and the picture at a keyframe it decodes on
+	// from, so the sound would be away first and heard alone for as long as
+	// the keyframe takes — mpv holds its audio for that (audio.c:
+	// audio_start_ao's delaying_audio_start).
+	starting bool
 	// seekSeq numbers the seeks: a drag sends many, and only the last is
 	// worth the decoder's while, as mpv merges its seeks.
 	seekSeq int64
@@ -178,11 +184,15 @@ func (e *Engine) runSound() {
 		time.Sleep(10 * time.Millisecond)
 	}
 	e.snd.Play()
+	startWait := 0
 	for {
 		e.mu.Lock()
 		stopped, paused := e.stopped, e.paused
 		seekReq := e.sndSeek
 		e.sndSeek = nil
+		// The sound waits for a picture of the place it was just sent to:
+		// its own seek lands on a frame, the picture's on a keyframe.
+		waiting := e.starting && len(e.queue) == 0
 		e.mu.Unlock()
 		if stopped {
 			return
@@ -194,6 +204,25 @@ func (e *Engine) runSound() {
 			e.snd.Seek(*seekReq)
 			continue
 		}
+		// The sound waits for a picture of the place it was just sent to:
+		// its own seek lands on a frame, the picture's on a keyframe, and
+		// the keyframe of a 4K HEVC film takes the better part of a second
+		// to decode — heard alone, which is what a drag left behind every
+		// time. mpv holds its audio start for the same (audio.c:
+		// audio_start_ao).
+		if waiting {
+			e.snd.Pause()
+			// A place with no picture at all is a decoder that failed on it:
+			// the sound goes on rather than waiting there for good.
+			if startWait++; startWait == 400 {
+				e.mu.Lock()
+				e.starting = false
+				e.mu.Unlock()
+			}
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		startWait = 0
 		if paused {
 			e.snd.Pause()
 			time.Sleep(30 * time.Millisecond)
@@ -364,6 +393,9 @@ func (e *Engine) fill() {
 		e.queue = append(e.queue, queued{at: e.base + off, pic: pic})
 		e.state = ui.VideoReady
 		e.step = step
+		// A picture of the new place is ready, and the sound may start
+		// there with it.
+		e.starting = false
 		wk := e.wake
 		e.mu.Unlock()
 		if wk != nil {
@@ -734,6 +766,9 @@ func (e *Engine) Seek(d time.Duration) {
 	src, snd := e.src, e.snd
 	if snd != nil {
 		e.sndSeek = &d
+		// The sound holds at the new place until a picture of it is ready,
+		// as mpv holds its audio start (audio.c: audio_start_ao).
+		e.starting = true
 	}
 	// A drag sends many seeks and each ran on a goroutine of its own, so
 	// the decoder was sought in whatever order they took its lock: it could
