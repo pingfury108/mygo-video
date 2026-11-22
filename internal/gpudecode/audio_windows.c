@@ -15,7 +15,12 @@
 static const GUID IID_ENUM = {0xa95664d2,0x9614,0x4f35,{0xa7,0x46,0xde,0x8d,0xb6,0x36,0x17,0xe6}};
 static const GUID IID_CLIENT = {0x1cb9ad4c,0xdbfa,0x4c32,{0xb1,0x78,0xc2,0xf5,0x68,0xa7,0x03,0xb2}};
 static const GUID IID_RENDER = {0xf294acfc,0x3146,0x4483,{0xa7,0xbf,0xad,0xdc,0xa7,0xc2,0x60,0xe2}};
-static const GUID IID_CLOCK = {0xcd63314f,0x3fba,0x4a1f,{0x81,0x2e,0xef,0x93,0x5b,0x9d,0xba,0xb6}};
+// IID_CLOCK is the IID of IAudioClock as Windows answers it, which the mingw
+// header this builds against spells differently: the value mpv asks with, the
+// one a device answers (ao_wasapi_utils.c:56). Getting it wrong asks for an
+// interface no device has, and the sound falls back to its buffer's padding,
+// which misses what the mixer still holds.
+static const GUID IID_CLOCK = {0xcd63314f,0x3fba,0x4a1b,{0x81,0x2c,0xef,0x96,0x35,0x87,0x28,0xe7}};
 static const GUID CLSID_ENUM = {0xbcde0395,0xe52f,0x467c,{0x8e,0x3d,0xc4,0x57,0x92,0x91,0x69,0x2e}};
 
 
@@ -235,10 +240,17 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	if (SUCCEEDED(a->client->lpVtbl->GetService(a->client, &IID_CLOCK,
 		(void **)&a->clock))) {
 		UINT64 freq = 0;
-		if (FAILED(a->clock->lpVtbl->GetFrequency(a->clock, &freq)))
+		HRESULT fh = a->clock->lpVtbl->GetFrequency(a->clock, &freq);
+		if (FAILED(fh))
 			a->clockFreq = 0;
 		else
 			a->clockFreq = freq;
+		char msg[160];
+		snprintf(msg, sizeof(msg), "audio_open: clock freq=%llu getfreq hr=%08lx",
+		         (unsigned long long)a->clockFreq, (unsigned long)fh);
+		audio_line(msg);
+	} else {
+		audio_line("audio_open: no clock service");
 	}
 	a->tb = a->fmt->streams[a->stream]->time_base;
 	if (startUs > 0) audio_seek(a, startUs);
@@ -392,6 +404,33 @@ static void audio_pause(Audio *a) {
 	if (a->started) a->client->lpVtbl->Stop(a->client);
 }
 
+// audio_probe writes what the device clock says against what the software
+// wrote, once in a while: an audio clock whose position includes samples the
+// device has not played yet runs ahead of the sound, and every picture chosen
+// off it runs ahead too. Read against the padding the device reports, it says
+// which of the two the position is.
+static void audio_probe(Audio *a, UINT64 position, UINT64 qpcPosition, int64_t us) {
+	static int n;
+	if ((n++ & 127) != 0) return;
+	const char *tmp = getenv("TEMP");
+	if (!tmp) return;
+	char path[512];
+	snprintf(path, sizeof(path), "%s\\mygo-audio-c.log", tmp);
+	FILE *f = fopen(path, "a");
+	if (!f) return;
+	UINT32 pad = 0;
+	if (a->client) a->client->lpVtbl->GetCurrentPadding(a->client, &pad);
+	REFERENCE_TIME latency = 0;
+	if (a->client) a->client->lpVtbl->GetStreamLatency(a->client, &latency);
+	int64_t dev = (int64_t)((double)position * 1e6 / (double)a->clockFreq);
+	int64_t written = (int64_t)(a->written * 1000000ULL / (UINT64)a->rate);
+	int64_t padUs = (int64_t)(pad * 1000000ULL / (UINT64)a->rate);
+	fprintf(f, "clock: devPos=%lldus written=%lldus pad=%lldus writtenLessPad=%lldus latency=%lldus report=%lldus\n",
+	        (long long)dev, (long long)written, (long long)padUs,
+	        (long long)(written - padUs), (long long)(latency / 10), (long long)us);
+	fclose(f);
+}
+
 // audio_position is how far the device has played, in microseconds, read off
 // its clock as mpv reads it (audio/out/ao_wasapi.c: get_device_delay): the
 // frames the clock counts, less the time the call itself took.
@@ -410,13 +449,16 @@ static int64_t audio_position(Audio *a) {
 			QueryPerformanceFrequency(&freq);
 			INT64 now = (INT64)((double)qpc.QuadPart * 1e7 / (double)freq.QuadPart);
 			INT64 behind = now - (INT64)qpcPosition;
-			if (behind > 0 && behind < 10 * 10000000LL) us -= behind / 10;
+			// The clock read when it read, not now: the time since is the
+			// device's own, and the place moves on by it.
+			if (behind > 0 && behind < 10 * 10000000LL) us += behind / 10;
 			if (us > 0) {
 				// The samples count from the first frame that reached the
 				// device, which a seek leaves past the place it asked for:
 				// the shift puts the count on the stream's own timeline.
 				us += a->haveFirst ? a->firstUs - a->startUs : 0;
 			}
+			audio_probe(a, position, qpcPosition, us);
 			return us > 0 ? us : 0;
 		}
 	}
