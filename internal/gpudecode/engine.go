@@ -474,14 +474,16 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 		}
 		// Every call the window makes, not just the calls that bring a new
 		// picture: the times between them are the window's own rhythm, which
-		// decides when a picture can reach the screen at all.
+		// decides when a picture can reach the screen at all. The queue and
+		// the sound's place come along, for the one call that changes a
+		// picture it had no business changing.
 		if e.tracing() {
 			fresh := "same"
 			if e.last != e.traceLast {
 				e.traceLast = e.last
 				fresh = "new"
 			}
-			pictureLine = fmt.Sprintf("%s picture %.3f pos %.3f left %v delay %v", fresh, e.last.Seconds(), pos.Seconds(), e.leadLocked().Milliseconds(), e.sndDelay.Milliseconds())
+			pictureLine = fmt.Sprintf("%s picture %.3f pos %.3f q=%d audioPos %.3f left %v delay %v", fresh, e.last.Seconds(), pos.Seconds(), len(e.queue), e.audioPos.Seconds(), e.leadLocked().Milliseconds(), e.sndDelay.Milliseconds())
 		}
 		e.mu.Unlock()
 		if line != "" {
