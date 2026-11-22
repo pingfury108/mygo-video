@@ -147,8 +147,7 @@ func (a *app) searchPlugin() {
 			}
 			a.pluginSearch = nil
 			if err != nil {
-				a.toast = err.Error()
-				a.invalidate()
+				a.say("%v", err)
 				return
 			}
 			for _, v := range r.Videos {

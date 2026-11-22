@@ -33,6 +33,7 @@ var (
 	iconClose    = strokeIcon(`<path d="M6 6l12 12M18 6L6 18"/>`)
 	iconMinimize = strokeIcon(`<path d="M5 12h14"/>`)
 	iconMaximize = strokeIcon(`<rect x="5" y="5" width="14" height="14" rx="1.5"/>`)
+	iconRestore  = strokeIcon(`<rect x="8" y="4" width="12" height="12" rx="1.5"/><path d="M8 8H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2"/>`)
 	iconSubs     = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 13h4M13 13h4M7 16h3"/>`)
 	iconFull     = strokeIcon(`<path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/>`)
 	iconEpisodes = strokeIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M9 5v14"/>`)

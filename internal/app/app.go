@@ -244,13 +244,9 @@ type app struct {
 	seekDragging bool
 	seekDrag     bool
 	seekHold     bool
-	// fullScreen follows the window: the pages draw their title bars from
-	// it, and a double click there leaves full screen where the frame has
-	// no buttons to leave it with.
-	fullScreen bool
-	lastSave   time.Time
-	fresh      bool
-	ended      bool
+	lastSave     time.Time
+	fresh        bool
+	ended        bool
 
 	// quality is what to ask a plugin for, and playingQuality what it gave.
 	quality        string
@@ -275,7 +271,8 @@ type app struct {
 	uiShown  time.Time
 	drawer   bool
 
-	toast string
+	toast   string
+	toastAt time.Time
 }
 
 // ReportFatal keeps what stopped the app from running in the data directory:
@@ -431,7 +428,7 @@ func (a *app) start() {
 		MinHeight:      600,
 		StateKey:       "main",
 		TitleBarStyle:  mygo.TitleBarHidden,
-		TitleBarHeight: 38,
+		TitleBarHeight: windowButtonHeight,
 		// Windows and Linux draw the buttons of a hidden title bar in a
 		// color the dark background hides, so the app draws its own.
 		HideWindowButtons:    runtime.GOOS != "darwin",
@@ -478,7 +475,7 @@ func (a *app) scan() {
 			a.win.Invalidate()
 		}
 		if n == 0 {
-			a.toast = "没有找到视频。把文件放进 ~/Movies 或应用数据目录下的 videos 文件夹。"
+			a.say("没有找到视频。把文件放进 ~/Movies 或应用数据目录下的 videos 文件夹。")
 		}
 	})
 }
@@ -812,7 +809,7 @@ func (a *app) play(it media.Item, fromStart bool) {
 		if a.playRemuxed(it, fromStart) {
 			return
 		}
-		a.toast = "打不开这个视频：" + err.Error()
+		a.say("打不开这个视频：%v", err)
 		a.openDetail(it)
 		return
 	}
@@ -1264,6 +1261,7 @@ func (a *app) setVolume(v float64) {
 
 func (a *app) say(format string, args ...any) {
 	a.toast = fmt.Sprintf(format, args...)
+	a.toastAt = time.Now()
 	a.invalidate()
 }
 

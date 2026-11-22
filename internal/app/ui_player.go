@@ -13,9 +13,13 @@ import (
 	"mygo-video/internal/subtitle"
 )
 
-// hideAfter is how long the controls stay once the pointer stops moving, as
-// a video keeps playing.
-const hideAfter = 3 * time.Second
+const (
+	// hideAfter is how long the controls stay once the pointer stops moving,
+	// as a video keeps playing.
+	hideAfter = 3 * time.Second
+	// playerNoticeTime is how long a message over the picture stays.
+	playerNoticeTime = 2500 * time.Millisecond
+)
 
 var rates = []float64{0.5, 0.75, 1, 1.25, 1.5, 2}
 
@@ -119,9 +123,7 @@ func (a *app) playerTop(c *ui.Context) {
 	if a.uiHidden {
 		shown = 0
 	}
-	// Under the window's controls, as a sidebar starts: the title bar of a
-	// video draws them over the picture, and nothing of ours goes in it.
-	padTop := c.TitleBar().Bottom + 8
+	padTop := a.playerTopPad(c)
 	// The page fills the window, the title bar included: a press on this bar
 	// drags the window, rather than pause the picture below it.
 	top := a.dragWindow(ui.Row(c).Absolute().Top(0).Left(0).Right(0).Height(padTop+56).
@@ -143,6 +145,37 @@ func (a *app) playerTop(c *ui.Context) {
 		ui.Text(c, a.playingSourceName()).FontSize(10.5).TextColor(ui.RGBA(255, 255, 255, 0.66)).
 			Padding(3, 9).Radius(20).Background(ui.RGBA(255, 255, 255, 0.1))
 	})
+}
+
+// playerTopPad keeps the player's own bar under the window controls.
+func (a *app) playerTopPad(c *ui.Context) float32 {
+	bottom := c.TitleBar().Bottom
+	if b := a.windowChromeBottom(); b > bottom {
+		bottom = b
+	}
+	return bottom + 8
+}
+
+// playerToast shows a short message over the picture, where the normal
+// toast at the bottom would sit on the player's controls.
+func (a *app) playerToast(c *ui.Context) {
+	if a.toast == "" {
+		return
+	}
+	if a.toastAt.IsZero() {
+		a.toast = ""
+		return
+	}
+	age := time.Since(a.toastAt)
+	if age >= playerNoticeTime {
+		a.toast = ""
+		return
+	}
+	ui.Box(c).Absolute().Left(0).Right(0).Top(a.playerTopPad(c) + 64).Center().IgnoreInput(true).Children(func() {
+		ui.Text(c, a.toast).FontSize(12.5).TextColor(ui.Hex("#ffffff")).MaxWidth(560).TextAlign(ui.Center).
+			Padding(6, 12).Radius(7).Background(ui.RGBA(0, 0, 0, 0.72))
+	})
+	c.After(playerNoticeTime - age)
 }
 
 func (a *app) playerControls(c *ui.Context) {
@@ -433,9 +466,13 @@ func (a *app) episodeDrawer(c *ui.Context) {
 		return
 	}
 	p := colors()
+	headerTop := float32(20)
+	if bottom := a.windowChromeBottom(); bottom > 0 {
+		headerTop = bottom + 8
+	}
 	ui.Column(c).Absolute().Top(0).Right(0).Bottom(0).Width(324).
 		Background(ui.RGBA(11, 13, 17, 0.97)).Border(1, p.hairline).Children(func() {
-		ui.Row(c).Padding(20, 16, 12, 16).AlignItems(ui.Center).Gap(8).Children(func() {
+		ui.Row(c).Padding(headerTop, 16, 12, 16).AlignItems(ui.Center).Gap(8).Children(func() {
 			ui.Text(c, "选集").FontSize(14).FontWeight(600)
 			ui.Text(c, fmt.Sprintf("%d 集", len(eps))).FontSize(11).TextColor(p.faint)
 			ui.Box(c).Grow(1)
@@ -578,36 +615,38 @@ func (a *app) toggleFullScreen() {
 		return
 	}
 	a.win.ToggleFullScreen()
-	a.fullScreen = a.win.IsFullScreen()
 }
 
-// exitFullScreen leaves full screen, for a click or a key that means to.
-func (a *app) exitFullScreen() {
-	if a.win == nil || !a.fullScreen {
+func (a *app) isFullScreen() bool {
+	return a.win != nil && a.win.IsFullScreen()
+}
+
+// toggleMaximize restores a maximized window, or leaves full screen rather
+// than stack a maximize on a frame that has no frame.
+func (a *app) toggleMaximize() {
+	if a.win == nil {
 		return
 	}
-	a.win.SetFullScreen(false)
-	a.fullScreen = false
+	if a.win.IsFullScreen() {
+		a.win.SetFullScreen(false)
+		return
+	}
+	if a.win.IsMaximized() {
+		a.win.Unmaximize()
+		return
+	}
+	a.win.Maximize()
 }
 
 // dragWindow makes a bar move the window, and a double click on it do what a
 // double click on a title bar does: leave full screen where the window is in
-// it — a full screen frame hides its buttons, and the pages after the player
-// had no way out of one — or maximize and restore as usual.
+// it, or maximize and restore as usual.
 func (a *app) dragWindow(bar ui.Element) ui.Element {
 	bar = bar.DragWindow()
 	if !bar.WindowDoubleClicked() || a.win == nil {
 		return bar
 	}
-	if a.fullScreen {
-		a.exitFullScreen()
-		return bar
-	}
-	if a.win.IsMaximized() {
-		a.win.Unmaximize()
-	} else {
-		a.win.Maximize()
-	}
+	a.toggleMaximize()
 	return bar
 }
 

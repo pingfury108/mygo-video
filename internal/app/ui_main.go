@@ -14,65 +14,84 @@ import (
 func (a *app) view(c *ui.Context) {
 	a.applyTheme(c)
 	c.OnShortcut(ui.Cmd, ui.KeyF, func() {
+		if a.route == pagePlayer && a.player != nil {
+			return
+		}
 		a.focusSearch = true
 		a.goPage(pageSearch)
 	})
 	if a.route == pagePlayer && a.player != nil {
 		a.playerPage(c)
-		return
-	}
-	if a.route == pagePlayer {
-		a.route = pageDetail
-	}
-	p := colors()
-	ui.Box(c).Fill().Children(func() {
-		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-			a.sidebar(c)
-			// The content keeps the bottom gap of the sidebar, so a row of
-			// posters stops where its nav does rather than running to the
-			// window's last pixel.
-			ui.Column(c).Grow(1).Padding(0, 0, 10, 0).Background(p.bg).Children(func() {
-				a.page(c)
+	} else {
+		if a.route == pagePlayer {
+			a.route = pageDetail
+		}
+		p := colors()
+		ui.Box(c).Fill().Children(func() {
+			ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+				a.sidebar(c)
+				// The content keeps the bottom gap of the sidebar, so a row of
+				// posters stops where its nav does rather than running to the
+				// window's last pixel.
+				ui.Column(c).Grow(1).Padding(0, 0, 10, 0).Background(p.bg).Children(func() {
+					a.page(c)
+				})
 			})
 		})
-		if runtime.GOOS != "darwin" {
-			a.windowButtons(c)
-		}
-	})
-	if a.toast != "" {
+	}
+	a.windowChrome(c)
+	if a.route == pagePlayer && a.player != nil {
+		a.playerToast(c)
+	} else if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
 	}
 	a.installDialogView(c)
 }
 
+// windowChrome draws what belongs to the window rather than a page, over
+// whichever page is open. A full screen window has no controls to draw.
+func (a *app) windowChrome(c *ui.Context) {
+	if runtime.GOOS == "darwin" || a.win == nil || a.isFullScreen() {
+		return
+	}
+	a.windowButtons(c)
+}
+
+const (
+	windowButtonWidth  = 46
+	windowButtonHeight = 38
+)
+
+// windowChromeBottom is where the app's own window buttons end, for pages
+// that start at the window's top edge. It is zero in full screen and on
+// macOS, where the system draws the controls.
+func (a *app) windowChromeBottom() float32 {
+	if runtime.GOOS == "darwin" || a.win == nil || a.isFullScreen() {
+		return 0
+	}
+	return windowButtonHeight
+}
+
 // windowButtons draws the minimize, maximize and close buttons of a window
 // whose title bar is hidden, where the system draws them in a color the
 // dark background hides.
 func (a *app) windowButtons(c *ui.Context) {
-	ui.Row(c).Absolute().Top(0).Right(0).Height(38).Children(func() {
-		a.windowButton(c, iconMinimize, false, func() { a.win.Minimize() })
-		a.windowButton(c, iconMaximize, false, func() {
-			// Full screen hides this bar, but a page drawn over a window left
-			// in it shows one here: the button leaves full screen rather than
-			// stack a maximize on a frame that has no frame.
-			if a.fullScreen {
-				a.exitFullScreen()
-				return
-			}
-			if a.win.IsMaximized() {
-				a.win.Unmaximize()
-				return
-			}
-			a.win.Maximize()
-		})
-		a.windowButton(c, iconClose, true, func() { a.win.Close() })
+	ui.Row(c).Absolute().Top(0).Right(0).Height(windowButtonHeight).Children(func() {
+		a.windowButton(c, iconMinimize, "最小化窗口", false, func() { a.win.Minimize() })
+		icon, label := iconMaximize, "最大化窗口"
+		if a.win.IsMaximized() {
+			icon, label = iconRestore, "还原窗口"
+		}
+		a.windowButton(c, icon, label, false, a.toggleMaximize)
+		a.windowButton(c, iconClose, "关闭窗口", true, func() { a.win.Close() })
 	})
 }
 
 // windowButton is one of those buttons, red for the one that closes.
-func (a *app) windowButton(c *ui.Context, icon *ui.SVG, danger bool, fn func()) {
-	b := ui.ButtonBase(c).Width(46).Height(38).FocusRing(false).Label("")
+func (a *app) windowButton(c *ui.Context, icon *ui.SVG, label string, danger bool, fn func()) {
+	b := ui.ButtonBase(c).Width(windowButtonWidth).Height(windowButtonHeight).
+		FocusRing(false).Label(label).Tooltip(label)
 	b.OnClick(fn)
 	if b.Hovered() {
 		if danger {
