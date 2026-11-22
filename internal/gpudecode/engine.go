@@ -107,6 +107,11 @@ type Engine struct {
 	// went quiet: past a minute the two stand together again where the film
 	// is, as mpv resets its audio for an underrun.
 	stall int
+	// presentLag is what a present took to reach the screen, measured by the
+	// window and told as each frame is asked for, smoothed gently: the lead
+	// follows it, for the compositor's part of a picture's way is in no
+	// clock of the engine's.
+	presentLag time.Duration
 	// syncLoggedAt is when the sync was last written down, once a second.
 	syncLoggedAt time.Time
 	// frameAt and frameStep are when the window last asked for a picture and
@@ -575,6 +580,27 @@ func (e *Engine) avOffset() time.Duration {
 	return e.avShift
 }
 
+// SetPresentLag takes what the last present took from its call to the screen
+// taking it, measured off the swap chain's own statistics and told with each
+// frame the window asks for. It is the part of a picture's way to the eye
+// that no clock inside the engine sees, and the lead a picture is handed over
+// by follows it: mpv reads its presentation feedback for the same
+// (video/out/vo.c: check_timed_frame_late, the late.lead it keeps).
+func (e *Engine) SetPresentLag(d time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if d <= 0 {
+		return // nothing measured: keep what a display's own period gave
+	}
+	if e.presentLag == 0 {
+		e.presentLag = d
+		return
+	}
+	// A gentle average: the measure jumps a refresh apart by what the
+	// compositor was busy with, and the lead must not.
+	e.presentLag = (e.presentLag*7 + d) / 8
+}
+
 // SetAVOffset moves the picture against the sound while a playback runs: a
 // positive offset shows the picture earlier, which is what a sound that runs
 // ahead of it wants. It is the audio delay a player offers, and it outlasts
@@ -617,13 +643,16 @@ func (e *Engine) leadLocked() time.Duration {
 	if step <= 0 {
 		step = 40 * time.Millisecond
 	}
-	// The lead is what a present takes: a frame handed over now reaches the
-	// screen at the compositor's next draw, which is on average half its
-	// period away, and a little past that for the drawing. Measured where it
-	// can be (composePeriod), a display's own where it cannot. mpv presents
-	// its vo's frames half a vsync ahead of their vsync for the same reason
-	// (vo.c: target = due - vsync_interval*(1+lead)/2).
-	lead := composePeriod()/2 + 2*time.Millisecond
+	// The lead is what a present takes to reach the screen, read off the
+	// swap chain where it measures itself (presentLag, told with each frame
+	// the window asks for); where nothing measures it, half of a
+	// compositor's period and a little for the drawing stands in. mpv reads
+	// its presentation feedback for the same and keeps the lead it finds
+	// (vo.c: check_timed_frame_late, late.lead).
+	lead := e.presentLag
+	if lead <= 0 {
+		lead = composePeriod()/2 + 2*time.Millisecond
+	}
 	if lead < step/8 {
 		lead = step / 8
 	}
