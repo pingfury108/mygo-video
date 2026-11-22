@@ -71,12 +71,42 @@ func main() {
 	nextSeek := time.Now().Add(time.Duration(seekEvery) * time.Second)
 	nextGap := time.Now().Add(100 * time.Millisecond)
 	where := time.Duration(start) * time.Second
+	back := false
+	// DRAGS limits the seeks to a hand that drags a while and stops: what
+	// the playback does after the hand is off the bar is the question, and
+	// a check that keeps dragging never asks it.
+	drags, _ := strconv.Atoi(os.Getenv("DRAGS"))
+	seeks := 0
 	for time.Now().Before(deadline) {
 		e.Frame(time.Now())
 		time.Sleep(16 * time.Millisecond)
-		if seekEvery > 0 && time.Now().After(nextSeek) {
-			nextSeek = nextSeek.Add(time.Duration(seekEvery) * time.Second)
-			where += time.Duration(seekEvery)*time.Second + 90*time.Second
+		if seekEvery > 0 && time.Now().After(nextSeek) && (drags == 0 || seeks < drags) {
+			// FAST drags the bar every half second, which is a hand moving
+			// it rather than a click on a place: the seeks come faster than
+			// the keyframe of one decodes, and each may land while the last
+			// has not reached the decoder yet.
+			seekGap := time.Duration(seekEvery) * time.Second
+			if os.Getenv("FAST") != "" {
+				seekGap = 500 * time.Millisecond
+			}
+			seeks++
+			nextSeek = nextSeek.Add(seekGap)
+			// BACK drags the bar forward and back in turn, which is the hand
+			// on a film: a seek forward alone leaves the device seeked one
+			// way, and a place walked back to is where a stale clock shows.
+			if os.Getenv("BACK") != "" {
+				if back {
+					where -= 120 * time.Second
+				} else {
+					where += 150 * time.Second
+				}
+				back = !back
+			} else {
+				where += time.Duration(seekEvery)*time.Second + 90*time.Second
+			}
+			if where < 0 {
+				where = 0
+			}
 			e.Seek(where)
 			fmt.Printf("seek to %v\n", where)
 		}

@@ -42,6 +42,10 @@ typedef struct {
 	// what the sound has played of the new place is what it read over that.
 	int64_t             posBase;
 	int                 posBaseSet;
+	// probeLeft is how many reads after a seek the log takes, so the place
+	// the clock names just after one shows: a seek that starts the count
+	// somewhere else reads at once.
+	int                 probeLeft;
 	UINT64              written; // frames handed to the device
 	UINT32              chunk; // frames a buffer holds
 	int                 rate;  // samples a second the device takes
@@ -417,7 +421,11 @@ static void audio_pause(Audio *a) {
 // which of the two the position is.
 static void audio_probe(Audio *a, UINT64 position, UINT64 qpcPosition, int64_t us) {
 	static int n;
-	if ((n++ & 127) != 0) return;
+	if (a->probeLeft > 0) {
+		a->probeLeft--;
+	} else if ((n++ & 127) != 0) {
+		return;
+	}
 	const char *tmp = getenv("TEMP");
 	if (!tmp) return;
 	char path[512];
@@ -529,9 +537,15 @@ static int audio_seek(Audio *a, int64_t us) {
 	a->pcmFrames = 0;
 	a->pcmAt = 0;
 	a->haveFirst = 0;
-	// The clock keeps counting from where it stood: what the sound plays of
-	// the place sought is read over that, or the playhead jumps by the whole
-	// of what was played before the seek.
+	// Stop and empty the device before the clock is read: the place it stands
+	// at then is the place the new sound starts counting from, and reading it
+	// before the seek lets whatever the device played as the seek came in be
+	// counted twice — a little more on every seek, and nothing lines up
+	// after a hand has dragged the bar a few times.
+	if (a->client) {
+		a->client->lpVtbl->Stop(a->client);
+		a->client->lpVtbl->Reset(a->client);
+	}
 	a->posBaseSet = 0;
 	if (a->clock && a->clockFreq > 0) {
 		UINT64 position = 0, qpcPosition = 0;
@@ -540,13 +554,14 @@ static int audio_seek(Audio *a, int64_t us) {
 			a->posBaseSet = 1;
 		}
 	}
-	if (a->client) {
-		a->client->lpVtbl->Stop(a->client);
-		a->client->lpVtbl->Reset(a->client);
-	}
 	a->written = 0;
 	a->started = 0;
 	a->eof = 0;
+	a->probeLeft = 4;
+	char msg[160];
+	snprintf(msg, sizeof(msg), "seek: asked=%lldus base=%lldus set=%d",
+	         (long long)us, (long long)a->posBase, a->posBaseSet);
+	audio_line(msg);
 	return 0;
 }
 
