@@ -1160,6 +1160,7 @@ func (a *app) retryPlayback() {
 	}
 	s.FFmpeg = a.ffmpeg
 	it := a.playing
+	live := it.Live || it.Source == "iptv"
 	ready := a.playReady
 	fromStart := a.fresh
 	if ready && !live {
@@ -1179,7 +1180,6 @@ func (a *app) retryPlayback() {
 	a.closePlayer()
 	a.retryStream = s
 	a.proxyToken = token
-	live := it.Live || it.Source == "iptv"
 	if webdav {
 		// The remux begins at s.Start, and the player's own clock counts
 		// from there: the playhead is put back on the file's timeline.
