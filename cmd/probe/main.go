@@ -5,7 +5,10 @@
 // own logs to be read: what a present took to be shown is measured only with
 // the whole pipeline standing, and this stands it without anyone clicking.
 //
-//	probe.exe <url or file> [seconds]
+//	probe.exe <url or file> [seconds [startSeconds [seekAtSeconds seekToSeconds]]]
+//
+// startSeconds lands the playback there before it shows anything, and
+// seekAtSeconds seeks it again while it plays, which is the drag of the bar.
 //
 // It says where the logs are when it ends. Run it in the session that shows
 // the desktop (a task of schtasks /it from a service session): the compositor
@@ -37,6 +40,24 @@ func main() {
 			secs = n
 		}
 	}
+	start := 0
+	if len(os.Args) > 3 {
+		if n, err := strconv.Atoi(os.Args[3]); err == nil {
+			start = n
+		}
+	}
+	seekAt := 0
+	if len(os.Args) > 4 {
+		if n, err := strconv.Atoi(os.Args[4]); err == nil {
+			seekAt = n
+		}
+	}
+	seekTo := 0
+	if len(os.Args) > 5 {
+		if n, err := strconv.Atoi(os.Args[5]); err == nil {
+			seekTo = n
+		}
+	}
 	for _, name := range []string{"mygo-sync.log", "mygo-frames.log"} {
 		os.Remove(filepath.Join(os.TempDir(), name))
 	}
@@ -48,8 +69,16 @@ func main() {
 			fmt.Println("open:", err)
 			os.Exit(1)
 		}
+		if start > 0 {
+			e.Seek(time.Duration(start) * time.Second)
+		}
 		pl := ui.NewVideoPlayerOf(e)
 		pl.Play()
+		if seekAt > 0 {
+			time.AfterFunc(time.Duration(seekAt)*time.Second, func() {
+				e.Seek(time.Duration(seekTo) * time.Second)
+			})
+		}
 		var win *mygo.Window
 		win = mygo.NewWindow(mygo.WindowOptions{
 			Title:  "MyGo Video probe",

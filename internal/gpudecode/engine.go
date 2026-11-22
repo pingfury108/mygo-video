@@ -94,6 +94,12 @@ type Engine struct {
 	// sndSeek is a seek for the thread that owns the device to make: the
 	// call reads the source and must not hold the window.
 	sndSeek *time.Duration
+	// sndPending tells the seek the sound's thread was given has not been
+	// made yet. Until it is, the device still reports the place before it,
+	// and a playhead taking that report would stand a whole playback length
+	// past the place asked for — which the picture, left that far behind,
+	// jumps to catch up with.
+	sndPending bool
 	// starting is set from a seek until a picture of the new place is ready:
 	// the sound seeks at a frame and the picture at a keyframe it decodes on
 	// from, so the sound would be away first and heard alone for as long as
@@ -211,6 +217,9 @@ func (e *Engine) runSound() {
 		// drawing for as long as it took.
 		if seekReq != nil {
 			e.snd.Seek(*seekReq)
+			e.mu.Lock()
+			e.sndPending = false
+			e.mu.Unlock()
 			continue
 		}
 		// The sound waits for a picture of the place it was just sent to:
@@ -260,6 +269,7 @@ func (e *Engine) runSound() {
 					if snd := e.snd; snd != nil {
 						d := e.at
 						e.sndSeek = &d
+						e.sndPending = true
 					}
 				}
 			} else if n == 0 && !e.snd.Done() && !e.stopped {
@@ -285,7 +295,7 @@ func (e *Engine) runSound() {
 			// Not once the playback is paused: the place it stopped at is the
 			// last the device reported, and a read that lands after the pause
 			// would move the picture on past where it stands.
-			if !e.paused {
+			if !e.paused && !e.sndPending {
 				// The device reports whole periods, a little behind the
 				// sound each time: taking it as it comes would step the
 				// playhead back by up to a period on every report, and the
@@ -297,6 +307,11 @@ func (e *Engine) runSound() {
 				if !e.audioAt.IsZero() {
 					predicted += time.Duration(float64(now.Sub(e.audioAt)) * e.rate)
 				}
+				// A report further ahead of the playhead than the sound moves
+				// in a second is not the device moving on: it is a place read
+				// before a seek landed, and taking it carries the playhead
+				// there and the picture with it. sndPending above is what
+				// keeps such a report out: past it the device is where it says.
 				if p > predicted || predicted-p > 60*time.Millisecond {
 					e.audioPos = p
 				}
@@ -839,6 +854,7 @@ func (e *Engine) Seek(d time.Duration) {
 	src, snd := e.src, e.snd
 	if snd != nil {
 		e.sndSeek = &d
+		e.sndPending = true
 		// The sound holds at the new place until a picture of it is ready,
 		// as mpv holds its audio start (audio.c: audio_start_ao).
 		e.starting = true

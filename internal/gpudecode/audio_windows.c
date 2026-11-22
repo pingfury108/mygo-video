@@ -36,6 +36,12 @@ typedef struct {
 	// mixer holds and the padding of the buffer does not.
 	IAudioClock        *clock;
 	UINT64              clockFreq;
+	// posBase is what the clock read the moment the sound was sought, and
+	// posBaseSet tells it was read: the clock counts from the device's own
+	// start and a reset does not carry it back to zero on every driver, so
+	// what the sound has played of the new place is what it read over that.
+	int64_t             posBase;
+	int                 posBaseSet;
 	UINT64              written; // frames handed to the device
 	UINT32              chunk; // frames a buffer holds
 	int                 rate;  // samples a second the device takes
@@ -425,8 +431,8 @@ static void audio_probe(Audio *a, UINT64 position, UINT64 qpcPosition, int64_t u
 	int64_t dev = (int64_t)((double)position * 1e6 / (double)a->clockFreq);
 	int64_t written = (int64_t)(a->written * 1000000ULL / (UINT64)a->rate);
 	int64_t padUs = (int64_t)(pad * 1000000ULL / (UINT64)a->rate);
-	fprintf(f, "clock: devPos=%lldus written=%lldus pad=%lldus writtenLessPad=%lldus latency=%lldus report=%lldus\n",
-	        (long long)dev, (long long)written, (long long)padUs,
+	fprintf(f, "clock: devPos=%lldus base=%lldus written=%lldus pad=%lldus writtenLessPad=%lldus latency=%lldus report=%lldus\n",
+	        (long long)dev, (long long)a->posBase, (long long)written, (long long)padUs,
 	        (long long)(written - padUs), (long long)(latency / 10), (long long)us);
 	fclose(f);
 }
@@ -440,7 +446,16 @@ static int64_t audio_position(Audio *a) {
 	if (a->clock && a->clockFreq > 0) {
 		UINT64 position = 0, qpcPosition = 0;
 		if (SUCCEEDED(a->clock->lpVtbl->GetPosition(a->clock, &position, &qpcPosition))) {
-			uint64_t frames = (uint64_t)((double)position * (double)a->rate / (double)a->clockFreq);
+			// A clock a reset carried back to zero starts the new place by
+			// itself; one that kept counting has the place read over the
+			// base. Whichever it is, the count of this place is what is left.
+			int64_t played = (int64_t)position;
+			if (a->posBaseSet) {
+				int64_t over = played - a->posBase;
+				if (over >= 0)
+					played = over;
+			}
+			uint64_t frames = (uint64_t)((double)played * (double)a->rate / (double)a->clockFreq);
 			int64_t us = (int64_t)(frames * 1000000ULL / (uint64_t)a->rate);
 			// The clock reports where it was when it read, not where it is
 			// now: the call's own length comes off (100ns units).
@@ -458,8 +473,7 @@ static int64_t audio_position(Audio *a) {
 				// the shift puts the count on the stream's own timeline.
 				us += a->haveFirst ? a->firstUs - a->startUs : 0;
 			}
-			audio_probe(a, position, qpcPosition, us);
-			return us > 0 ? us : 0;
+			audio_probe(a, position, qpcPosition, us);			return us > 0 ? us : 0;
 		}
 	}
 	UINT32 pad = 0;
@@ -515,6 +529,17 @@ static int audio_seek(Audio *a, int64_t us) {
 	a->pcmFrames = 0;
 	a->pcmAt = 0;
 	a->haveFirst = 0;
+	// The clock keeps counting from where it stood: what the sound plays of
+	// the place sought is read over that, or the playhead jumps by the whole
+	// of what was played before the seek.
+	a->posBaseSet = 0;
+	if (a->clock && a->clockFreq > 0) {
+		UINT64 position = 0, qpcPosition = 0;
+		if (SUCCEEDED(a->clock->lpVtbl->GetPosition(a->clock, &position, &qpcPosition))) {
+			a->posBase = (int64_t)position;
+			a->posBaseSet = 1;
+		}
+	}
 	if (a->client) {
 		a->client->lpVtbl->Stop(a->client);
 		a->client->lpVtbl->Reset(a->client);
