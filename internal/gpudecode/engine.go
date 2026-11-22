@@ -470,7 +470,7 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 		line := ""
 		if e.syncLoggedAt.IsZero() || t.Sub(e.syncLoggedAt) >= 250*time.Millisecond {
 			e.syncLoggedAt = t
-			line = e.syncLine(pos)
+			line = e.syncLine(pos) + " | " + e.presentLagLine()
 		}
 		// Every call the window makes, not just the calls that bring a new
 		// picture: the times between them are the window's own rhythm, which
@@ -671,6 +671,13 @@ func (e *Engine) syncLine(pos time.Duration) string {
 		pos.Seconds(), e.last.Seconds(), (e.last - pos).Milliseconds(),
 		e.leadLocked(), e.sndDelay, e.frameStep.Round(time.Millisecond), len(e.queue),
 		q0.String(), qn.String(), e.skipping, e.rate, e.ended)
+}
+
+// presentLagLine says what the swap chain measured of the last present's way
+// to the screen, for the log: the lead follows it, and what it reads is worth
+// seeing beside the gap.
+func (e *Engine) presentLagLine() string {
+	return fmt.Sprintf("present lag %v (lead %v)", e.presentLag.Round(time.Millisecond), e.leadLocked())
 }
 
 // Sync reports where the picture and the sound stood when the picture now
