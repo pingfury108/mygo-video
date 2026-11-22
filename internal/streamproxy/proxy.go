@@ -513,6 +513,11 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		segType, segExt = "fmp4", ".m4s"
 	}
 	args = append(args,
+		// An MPEG-TS part otherwise begins at 1.4 s, which the player's
+		// clock reports on top of the place the remux was asked for:
+		// progress, subtitles and the resume point all drift by it.
+		"-muxdelay", "0",
+		"-muxpreload", "0",
 		"-f", "hls",
 		"-hls_time", hlsTime,
 		"-hls_playlist_type", "event",

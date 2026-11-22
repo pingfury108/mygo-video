@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -195,10 +196,14 @@ type app struct {
 	webdavIndexAt   time.Time
 	// webdavHLS says the video plays as HLS remuxed here, from
 	// webdavBase on, and its length is what ffmpeg said.
-	webdavHLS        bool
-	webdavBase       time.Duration
-	webdavDuration   time.Duration
-	webdavDurationID string
+	webdavHLS  bool
+	webdavBase time.Duration
+	// eventHLS says the player shows a proxy-made event playlist, whose
+	// own duration is only what ffmpeg has written so far. streamDuration
+	// is the file's real length, from ffmpeg, for the item it names.
+	eventHLS         bool
+	streamDuration   time.Duration
+	streamDurationID string
 
 	// The live source: the playlist read, its groups, and the group showing.
 	iptvURL      string
@@ -933,6 +938,8 @@ func (a *app) playRemuxed(it media.Item, fromStart bool) bool {
 	}
 	a.retryStream = streamproxy.Stream{URL: it.Path, Type: "remux"}
 	a.beginPlayback(it, player, fromStart)
+	a.eventHLS = true
+	a.probeStreamDuration(it.ID, it.Path, nil)
 	a.diag("remuxed %s", it.Path)
 	return true
 }
@@ -1010,7 +1017,7 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 			return
 		}
 	}
-	player, token, _, err := a.openStream(streamproxy.Stream{
+	player, token, url, err := a.openStream(streamproxy.Stream{
 		URL:     videoURL,
 		Type:    kind,
 		Audio:   audio,
@@ -1030,6 +1037,10 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 	}
 	a.retryStream = streamproxy.Stream{URL: videoURL, Audio: audio, Headers: pb.Headers, Relay: pb.Relay}
 	a.beginPlayback(it, player, fromStart)
+	if !pb.Live && strings.Contains(url, "/hls/") {
+		a.eventHLS = true
+		a.probeStreamDuration(it.ID, videoURL, pb.Headers)
+	}
 	a.playingQuality = pb.Quality
 	if pb.Live {
 		a.startLiveDanmaku(it)
@@ -1151,7 +1162,7 @@ func (a *app) retryPlayback() {
 	it := a.playing
 	ready := a.playReady
 	fromStart := a.fresh
-	if ready {
+	if ready && !live {
 		fromStart = false
 	}
 	url, token, err := a.proxy.Open(s)
@@ -1168,16 +1179,24 @@ func (a *app) retryPlayback() {
 	a.closePlayer()
 	a.retryStream = s
 	a.proxyToken = token
+	live := it.Live || it.Source == "iptv"
 	if webdav {
 		// The remux begins at s.Start, and the player's own clock counts
 		// from there: the playhead is put back on the file's timeline.
 		a.webdavHLS = true
 		a.webdavBase = s.Start
 		a.beginPlayback(it, player, true)
-		a.probeWebDAVDuration(it)
+		if !live {
+			a.eventHLS = true
+			a.probeStreamDuration(it.ID, s.URL, s.Headers)
+		}
 	} else {
 		a.beginPlayback(it, player, fromStart)
-		if ready {
+		if !live {
+			a.eventHLS = true
+			a.probeStreamDuration(it.ID, s.URL, s.Headers)
+		}
+		if ready && !live {
 			// The player's clock starts at zero for the remux: put it
 			// back where the interrupted playback stood.
 			player.Seek(resume)
@@ -1201,8 +1220,11 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	if it.Source != "webdav" {
 		a.webdavHLS = false
 		a.webdavBase = 0
-		a.webdavDuration = 0
-		a.webdavDurationID = ""
+	}
+	a.eventHLS = false
+	if a.streamDurationID != it.ID {
+		a.streamDuration = 0
+		a.streamDurationID = it.ID
 	}
 	a.player = p
 	a.playing = it
@@ -1286,6 +1308,11 @@ func (a *app) saveProgress() {
 		return
 	}
 	pos := a.playhead().Milliseconds()
+	if a.seekHold {
+		// The seek has not landed yet, and the player may still report the
+		// old place: keep the place the hand chose, not a stale zero.
+		pos = time.Duration(a.seek * float64(time.Second)).Milliseconds()
+	}
 	dur := a.playLength().Milliseconds()
 	done := dur > 0 && pos >= dur-1500
 	prev, ok := a.store.Progress(a.playing.ID)
@@ -1456,7 +1483,9 @@ func (a *app) hevcNeedsTranscode(s streamproxy.Stream) bool {
 		args = append(args, "-headers", h)
 	}
 	args = append(args, "-i", s.URL)
-	cmd := exec.Command(a.ffmpeg, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, a.ffmpeg, args...)
 	executil.Hide(cmd)
 	out, _ := cmd.CombinedOutput()
 	hevc := strings.Contains(string(out), "Video: hevc")
@@ -1495,7 +1524,9 @@ func (a *app) hevcSource(s streamproxy.Stream) bool {
 		args = append(args, "-headers", h)
 	}
 	args = append(args, "-i", s.URL)
-	cmd := exec.Command(a.ffmpeg, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, a.ffmpeg, args...)
 	executil.Hide(cmd)
 	out, _ := cmd.CombinedOutput()
 	hevc := strings.Contains(string(out), "Video: hevc")
@@ -1518,7 +1549,8 @@ func needsFFmpegBeforeOpen(path string) bool {
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".mkv", ".avi", ".webm", ".flv", ".wmv", ".rm", ".rmvb",
-		".ts", ".m2ts", ".mts", ".vob", ".ogv":
+		".ts", ".m2ts", ".mts", ".vob", ".ogv", ".ogm", ".mpg", ".mpeg",
+		".m2v", ".asf", ".divx":
 		return true
 	}
 	return false

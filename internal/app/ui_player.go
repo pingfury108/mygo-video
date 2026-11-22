@@ -61,7 +61,7 @@ func (a *app) playerPage(c *ui.Context) {
 	}
 	// A series goes on to its next episode when one ends. The player reports
 	// Ended late, or never, so the end is read off the clock as well.
-	if pl.Ready() && (pl.Ended() || a.atEnd()) {
+	if pl.Ready() && a.playbackEnded(pl) {
 		if !a.ended {
 			a.ended = true
 			a.playNext()
@@ -125,7 +125,8 @@ func (a *app) playerPage(c *ui.Context) {
 				}
 				a.playerMessage(c, msg, "", false, nil)
 			default:
-				a.playerMessage(c, "打不开这个视频", playbackErrorText(err), true, nil)
+				a.playerMessage(c, "打不开这个视频", playbackErrorText(err), true,
+					a.reconnectPlayback)
 			}
 		} else if !pl.Ready() {
 			a.playerMessage(c, "正在打开…", "", false, nil)
@@ -339,8 +340,8 @@ func (a *app) playhead() time.Duration {
 
 // playLength is how long the video is, which ffmpeg tells for a remux.
 func (a *app) playLength() time.Duration {
-	if a.webdavDuration > 0 {
-		return a.webdavDuration
+	if a.streamDuration > 0 {
+		return a.streamDuration
 	}
 	if a.player != nil {
 		return a.player.Duration()
@@ -354,11 +355,28 @@ func (a *app) playLength() time.Duration {
 // short of it: further back a seek lands, whose landing would count as an
 // end, and further back the watched mark of a video cut early misses.
 func (a *app) atEnd() bool {
+	if a.eventHLS && a.streamDuration <= 0 {
+		// An event playlist's duration is only what ffmpeg has written
+		// so far. Counting the end from it would call a video over as
+		// soon as the playhead caught up with the remux, and skip to the
+		// next episode. Wait for the length ffmpeg read from the file.
+		return false
+	}
 	length := a.playLength()
 	if length <= 0 {
 		return false
 	}
 	return a.playhead() >= length-500*time.Millisecond
+}
+
+// playbackEnded says the video reached its end. An event playlist's own
+// end is where ffmpeg stopped writing for now, not where the file ends:
+// only the file's length can say that.
+func (a *app) playbackEnded(pl *ui.VideoPlayer) bool {
+	if a.eventHLS {
+		return a.atEnd()
+	}
+	return pl.Ended() || a.atEnd()
 }
 
 // seekTo moves to d, the whole file's time: a remux starts over there.
@@ -542,7 +560,7 @@ func (a *app) playerMessage(c *ui.Context, title, detail string, failure bool, r
 					MaxWidth(520).TextAlign(ui.Center)
 			}
 			if retry != nil {
-				ghostButton(c, "从当前进度重试", iconRefresh, retry)
+				ghostButton(c, "重新尝试", iconRefresh, retry)
 			}
 			if failure {
 				ghostButton(c, "返回", iconBack, a.leavePlayer)

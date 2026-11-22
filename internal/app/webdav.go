@@ -174,9 +174,12 @@ func (a *app) playWebDAV(it media.Item, fromStart bool) {
 // there, for the files the player can't seek in itself.
 func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	a.closePlayer()
-	if a.webdavDurationID != it.ID {
-		a.webdavDuration = 0
-		a.webdavDurationID = it.ID
+	// A seek opens the stream afresh: the ways in the video took before
+	// belong to the playback that was left, not to this one.
+	delete(a.retryStage, it.ID)
+	if a.streamDurationID != it.ID {
+		a.streamDuration = 0
+		a.streamDurationID = it.ID
 	}
 	// The GPU decoder plays the file as it is, inside this window: the
 	// picture stays on the GPU, and the transcode below is only for the
@@ -248,8 +251,11 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	a.subsOn = false
 	a.retryStream = streamproxy.Stream{URL: it.RemoteID, Headers: a.webdavAuth(), Start: d}
 	a.beginPlayback(it, player, true)
-	if !a.webdavHLS && d > 0 {
-		player.Seek(d)
+	a.eventHLS = a.webdavHLS
+	if d > 0 {
+		if !a.webdavHLS {
+			player.Seek(d)
+		}
 		a.seek = d.Seconds()
 		a.seekHold = true
 		a.seekedAt = time.Now()
@@ -257,21 +263,22 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	a.probeWebDAVDuration(it)
 }
 
-// probeWebDAVDuration asks ffmpeg how long the video is: an HLS remux
+// probeStreamDuration asks ffmpeg how long the video is: an HLS remux
 // tells the player only what it has made so far.
-func (a *app) probeWebDAVDuration(it media.Item) {
+func (a *app) probeStreamDuration(id, url string, headers map[string]string) {
 	ff := a.ffmpeg
-	if ff == "" {
+	if ff == "" || (a.streamDurationID == id && a.streamDuration > 0) {
 		return
 	}
 	args := []string{"-hide_banner", "-rw_timeout", "15000000"}
-	if h := headerArg(a.webdavAuth()); h != "" {
+	if h := headerArg(headers); h != "" {
 		args = append(args, "-headers", h)
 	}
-	args = append(args, "-i", it.RemoteID)
-	id := it.ID
+	args = append(args, "-i", url)
 	go func() {
-		cmd := exec.Command(ff, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, ff, args...)
 		executil.Hide(cmd)
 		out, _ := cmd.CombinedOutput()
 		sec, ok := ffmpegDuration(string(out))
@@ -281,13 +288,17 @@ func (a *app) probeWebDAVDuration(it media.Item) {
 		mygo.RunOnMain(func() {
 			// The listener moved on while ffmpeg read: the length is of
 			// the video no longer playing.
-			if a.webdavDurationID != id {
+			if a.streamDurationID != id {
 				return
 			}
-			a.webdavDuration = time.Duration(sec * float64(time.Second))
+			a.streamDuration = time.Duration(sec * float64(time.Second))
 			a.invalidate()
 		})
 	}()
+}
+
+func (a *app) probeWebDAVDuration(it media.Item) {
+	a.probeStreamDuration(it.ID, it.RemoteID, a.webdavAuth())
 }
 
 // ffmpegDuration reads the length ffmpeg prints of its input, as
