@@ -675,6 +675,12 @@ func (e *Engine) leadLocked() time.Duration {
 	if lead <= 0 {
 		lead = composePeriod()/2 + 2*time.Millisecond
 	}
+	// The window draws the picture it was handed at its next frame, half an
+	// interval on average, and the present reaches the screen only after
+	// that: a picture handed over for the moment the sound is at arrives
+	// that much later than it, and the sound sounds late by it. What the
+	// window's own frames cost is what it measured of them (frameStep).
+	lead += e.frameStep / 2
 	if lead < step/8 {
 		lead = step / 8
 	}
