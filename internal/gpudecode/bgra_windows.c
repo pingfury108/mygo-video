@@ -8,6 +8,19 @@
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
 
+// CONV_SLOTS is how many pictures may stand converted at once. The engine
+// decodes a few pictures ahead of the sound, and each queued picture must
+// keep its own texture: one texture reused for every decode shows the
+// newest picture, not the one the engine chose for this moment.
+#define CONV_SLOTS 8
+
+typedef struct {
+	ID3D11Texture2D                  *bgra;
+	ID3D11VideoProcessorOutputView   *outView;
+	IDXGIKeyedMutex                  *mutex;
+	HANDLE                            handle;
+} ConvOut;
+
 typedef struct {
 	ID3D11Device                     *dev;
 	ID3D11DeviceContext              *ctx;
@@ -15,17 +28,14 @@ typedef struct {
 	ID3D11VideoContext               *vctx;
 	ID3D11VideoProcessorEnumerator   *vpe;
 	ID3D11VideoProcessor             *vp;
-	ID3D11Texture2D                  *bgra;
-	ID3D11VideoProcessorOutputView   *outView;
+	ConvOut                           out[CONV_SLOTS];
 	ID3D11VideoProcessorInputView    *inViews[32];
 	ID3D11Texture2D                  *inTex;
-	IDXGIKeyedMutex                  *mutex;
-	HANDLE                            handle;
 	UINT                              w, h;
 } Conv;
 
-// conv_init makes the BGRA texture the pictures land in, shares it by its NT
-// handle, and sets up the video processor that converts NV12 to it.
+// conv_init sets up the video processor that converts NV12 to BGRA. The BGRA
+// textures are made a slot at a time, as the pictures that need them come.
 static int conv_init(Conv *c, ID3D11Device *dev, ID3D11DeviceContext *ctx, UINT w, UINT h) {
 	fprintf(stderr, "[conv] init dev=%p ctx=%p %ux%u\n", (void *)dev, (void *)ctx, w, h);
 	c->dev = dev;
@@ -33,29 +43,6 @@ static int conv_init(Conv *c, ID3D11Device *dev, ID3D11DeviceContext *ctx, UINT 
 	if (FAILED(dev->lpVtbl->QueryInterface(dev, &IID_ID3D11VideoDevice, (void **)&c->vdev))) { fprintf(stderr, "[conv] no video device\n"); return -1; }
 	fprintf(stderr, "[conv] video device ok\n");
 	if (FAILED(ctx->lpVtbl->QueryInterface(ctx, &IID_ID3D11VideoContext, (void **)&c->vctx))) return -2;
-
-	D3D11_TEXTURE2D_DESC td;
-	ZeroMemory(&td, sizeof(td));
-	td.Width = w;
-	td.Height = h;
-	td.MipLevels = 1;
-	td.ArraySize = 1;
-	td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-	td.SampleDesc.Count = 1;
-	td.Usage = D3D11_USAGE_DEFAULT;
-	td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-	td.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
-	if (FAILED(dev->lpVtbl->CreateTexture2D(dev, &td, NULL, &c->bgra))) { fprintf(stderr, "[conv] no texture\n"); return -3; }
-	fprintf(stderr, "[conv] texture ok\n");
-
-	IDXGIResource1 *res = NULL;
-	if (FAILED(c->bgra->lpVtbl->QueryInterface(c->bgra, &IID_IDXGIResource1, (void **)&res))) return -4;
-	HRESULT hr = res->lpVtbl->CreateSharedHandle(res, NULL,
-		DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, NULL, &c->handle);
-	res->lpVtbl->Release(res);
-	if (FAILED(hr)) return -5;
-
-	if (FAILED(c->bgra->lpVtbl->QueryInterface(c->bgra, &IID_IDXGIKeyedMutex, (void **)&c->mutex))) return -6;
 
 	D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd;
 	ZeroMemory(&cd, sizeof(cd));
@@ -78,18 +65,68 @@ static int conv_init(Conv *c, ID3D11Device *dev, ID3D11DeviceContext *ctx, UINT 
 	return 0;
 }
 
-// conv_blit converts slice index of the NV12 texture into the BGRA one, under
-// its keyed mutex, and returns the handle the renderer opens.
-static int conv_blit(Conv *c, ID3D11Texture2D *nv12, int index, HANDLE *out) {
-	// The output view never changes: every picture lands in the same texture.
-	if (!c->outView) {
-		D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC ovd;
-		ZeroMemory(&ovd, sizeof(ovd));
-		ovd.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
-		if (FAILED(c->vdev->lpVtbl->CreateVideoProcessorOutputView(c->vdev,
-			(ID3D11Resource *)c->bgra, c->vpe, &ovd, &c->outView)))
-			return -2;
+static void conv_out_free(ConvOut *o) {
+	if (o->outView) o->outView->lpVtbl->Release(o->outView);
+	if (o->mutex) o->mutex->lpVtbl->Release(o->mutex);
+	if (o->handle) CloseHandle(o->handle);
+	if (o->bgra) o->bgra->lpVtbl->Release(o->bgra);
+	ZeroMemory(o, sizeof(*o));
+}
+
+// conv_out_make makes the BGRA texture of a slot, shared by an NT handle with
+// a keyed mutex, and the output view that writes it.
+static int conv_out_make(Conv *c, int slot) {
+	ConvOut *o = &c->out[slot];
+	if (o->bgra) return 0;
+	D3D11_TEXTURE2D_DESC td;
+	ZeroMemory(&td, sizeof(td));
+	td.Width = c->w;
+	td.Height = c->h;
+	td.MipLevels = 1;
+	td.ArraySize = 1;
+	td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+	td.SampleDesc.Count = 1;
+	td.Usage = D3D11_USAGE_DEFAULT;
+	td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+	td.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+	if (FAILED(c->dev->lpVtbl->CreateTexture2D(c->dev, &td, NULL, &o->bgra))) return -3;
+
+	IDXGIResource1 *res = NULL;
+	if (FAILED(o->bgra->lpVtbl->QueryInterface(o->bgra, &IID_IDXGIResource1, (void **)&res))) {
+		conv_out_free(o);
+		return -4;
 	}
+	HRESULT hr = res->lpVtbl->CreateSharedHandle(res, NULL,
+		DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, NULL, &o->handle);
+	res->lpVtbl->Release(res);
+	if (FAILED(hr)) {
+		conv_out_free(o);
+		return -5;
+	}
+	if (FAILED(o->bgra->lpVtbl->QueryInterface(o->bgra, &IID_IDXGIKeyedMutex, (void **)&o->mutex))) {
+		conv_out_free(o);
+		return -6;
+	}
+	D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC ovd;
+	ZeroMemory(&ovd, sizeof(ovd));
+	ovd.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+	if (FAILED(c->vdev->lpVtbl->CreateVideoProcessorOutputView(c->vdev,
+		(ID3D11Resource *)o->bgra, c->vpe, &ovd, &o->outView))) {
+		conv_out_free(o);
+		return -7;
+	}
+	return 0;
+}
+
+// conv_blit converts slice index of the NV12 texture into the BGRA texture of
+// a slot, under that slot's keyed mutex, and returns its handle. The slot
+// belongs to the picture the engine queued, so a later decode cannot change
+// what an earlier picture shows.
+static int conv_blit(Conv *c, ID3D11Texture2D *nv12, int index, int slot, HANDLE *out) {
+	if (slot < 0 || slot >= CONV_SLOTS) return -8;
+	int rc = conv_out_make(c, slot);
+	if (rc) return rc;
+	ConvOut *o = &c->out[slot];
 	// The input views are one per slice of the array the decoder keeps its
 	// pictures in, which it reuses from frame to frame: made once, then kept.
 	ID3D11VideoProcessorInputView *in = NULL;
@@ -118,7 +155,7 @@ static int conv_blit(Conv *c, ID3D11Texture2D *nv12, int index, HANDLE *out) {
 		}
 	}
 
-	HRESULT hr = c->mutex->lpVtbl->AcquireSync(c->mutex, 0, 1000);
+	HRESULT hr = o->mutex->lpVtbl->AcquireSync(o->mutex, 0, 1000);
 	if (hr != S_OK && hr != WAIT_ABANDONED) {
 		return -3;
 	}
@@ -126,23 +163,20 @@ static int conv_blit(Conv *c, ID3D11Texture2D *nv12, int index, HANDLE *out) {
 	ZeroMemory(&st, sizeof(st));
 	st.Enable = TRUE;
 	st.pInputSurface = in;
-	hr = c->vctx->lpVtbl->VideoProcessorBlt(c->vctx, c->vp, c->outView, 0, 1, &st);
-	c->mutex->lpVtbl->ReleaseSync(c->mutex, 0);
+	hr = c->vctx->lpVtbl->VideoProcessorBlt(c->vctx, c->vp, o->outView, 0, 1, &st);
+	o->mutex->lpVtbl->ReleaseSync(o->mutex, 0);
 	if (FAILED(hr)) return -4;
-	*out = c->handle;
+	*out = o->handle;
 	return 0;
 }
 
 static void conv_free(Conv *c) {
-	if (c->outView) c->outView->lpVtbl->Release(c->outView);
 	for (int i = 0; i < 32; i++) {
 		if (c->inViews[i]) c->inViews[i]->lpVtbl->Release(c->inViews[i]);
 	}
+	for (int i = 0; i < CONV_SLOTS; i++) conv_out_free(&c->out[i]);
 	if (c->vp) c->vp->lpVtbl->Release(c->vp);
 	if (c->vpe) c->vpe->lpVtbl->Release(c->vpe);
-	if (c->mutex) c->mutex->lpVtbl->Release(c->mutex);
-	if (c->handle) CloseHandle(c->handle);
-	if (c->bgra) c->bgra->lpVtbl->Release(c->bgra);
 	if (c->vctx) c->vctx->lpVtbl->Release(c->vctx);
 	if (c->vdev) c->vdev->lpVtbl->Release(c->vdev);
 	ZeroMemory(c, sizeof(*c));

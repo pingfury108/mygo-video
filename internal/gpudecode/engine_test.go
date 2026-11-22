@@ -22,6 +22,7 @@ type fakeFrames struct {
 	ended    bool
 	skipping bool
 	skips    int
+	released int
 }
 
 func (f *fakeFrames) Next() (ui.VideoPicture, time.Duration, error) {
@@ -53,6 +54,24 @@ func (f *fakeFrames) SetSkip(on bool) {
 	}
 	f.skipping = on
 	f.mu.Unlock()
+}
+
+func (f *fakeFrames) Release(ui.VideoPicture) {
+	f.mu.Lock()
+	f.released++
+	f.mu.Unlock()
+}
+
+func (f *fakeFrames) skipCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.skips
+}
+
+func (f *fakeFrames) releaseCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.released
 }
 
 func (f *fakeFrames) Seek(d time.Duration) error { return nil }
@@ -324,10 +343,10 @@ func TestLagTurnsSkipOn(t *testing.T) {
 	e.Play()
 
 	time.Sleep(2 * time.Second)
-	if src.skips == 0 {
+	if src.skipCount() == 0 {
 		t.Fatal("the decoder was never asked to skip")
 	}
-	t.Logf("skip turned on %d time(s) in %v of playback", src.skips, 2*time.Second)
+	t.Logf("skip turned on %d time(s) in %v of playback", src.skipCount(), 2*time.Second)
 }
 
 // TestHugeLagJumpsToNewest is the ffplay threshold: when the playhead is
@@ -446,6 +465,21 @@ func TestPositionAnswersWhilePlaying(t *testing.T) {
 		t.Logf("position %v", pos)
 	case <-time.After(2 * time.Second):
 		t.Fatal("Position never answered: a lock taken twice")
+	}
+}
+
+// TestReleaseGivesEachTextureBackOnce is the queue and the picture showing
+// holding the same picture: it takes one slot, and must give back one.
+func TestReleaseGivesEachTextureBackOnce(t *testing.T) {
+	src := &fakeFrames{}
+	p := ui.NewTexturePicture(41, 41, 1, 1)
+	releasePictures(src, p, p)
+	if n := src.releaseCount(); n != 1 {
+		t.Fatalf("released %d times for one texture", n)
+	}
+	releasePictures(src, ui.NewTexturePicture(42, 42, 1, 1))
+	if n := src.releaseCount(); n != 2 {
+		t.Fatalf("released %d times for two textures", n)
 	}
 }
 

@@ -144,6 +144,9 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	a->dec = avcodec_alloc_context3(codec);
 	if (!a->dec) return -5;
 	if (avcodec_parameters_to_context(a->dec, a->fmt->streams[a->stream]->codecpar) < 0) return -6;
+	// The decoder hands a frame's timestamp back in this time base, as
+	// mpv's decoder does (vd_lavc.c: avctx->pkt_timebase).
+	a->dec->pkt_timebase = a->fmt->streams[a->stream]->time_base;
 	if (avcodec_open2(a->dec, codec, NULL) < 0) return -7;
 	a->pkt = av_packet_alloc();
 	a->frame = av_frame_alloc();
@@ -274,12 +277,17 @@ static int audio_decode(Audio *a) {
 	for (;;) {
 		int r = avcodec_receive_frame(a->dec, a->frame);
 		if (r == 0) {
+			// The frame's own place, where the container gave only a decode
+			// timestamp: best_effort_timestamp estimates it, as mpv reads
+			// a frame's pts.
+			int64_t pts = a->frame->best_effort_timestamp;
+			if (pts == AV_NOPTS_VALUE) pts = a->frame->pts;
 			// A seek lands on the frame the index holds before the place
 			// asked for, and the sound of the ones before it belongs to where
 			// the playhead no longer is: playing it would run the sound ahead
 			// of the picture by the length of what came first.
-			if (a->startUs > 0 && a->frame->pts != AV_NOPTS_VALUE && a->tb.num > 0) {
-				int64_t ptsUs = av_rescale_q(a->frame->pts, a->tb, AV_TIME_BASE_Q);
+			if (a->startUs > 0 && pts != AV_NOPTS_VALUE && a->tb.num > 0) {
+				int64_t ptsUs = av_rescale_q(pts, a->tb, AV_TIME_BASE_Q);
 				if (ptsUs < a->startUs) {
 					av_frame_unref(a->frame);
 					continue;
@@ -289,8 +297,8 @@ static int audio_decode(Audio *a) {
 			// seek lands on the frame before the place it asked for, and the
 			// sound of the frames it dropped does not exist, so this reaches
 			// past the place asked for by however much it was rounded.
-			if (!a->haveFirst && a->frame->pts != AV_NOPTS_VALUE && a->tb.num > 0) {
-				a->firstUs = av_rescale_q(a->frame->pts, a->tb, AV_TIME_BASE_Q);
+			if (!a->haveFirst && pts != AV_NOPTS_VALUE && a->tb.num > 0) {
+				a->firstUs = av_rescale_q(pts, a->tb, AV_TIME_BASE_Q);
 				a->haveFirst = 1;
 				char buf[160];
 				snprintf(buf, sizeof(buf), "audio_open: first frame %.3fs, sought %.3fs, %+dms",
@@ -393,7 +401,8 @@ static int audio_fill(Audio *a) {
 static int audio_play(Audio *a) {
 	audio_apartment();
 	if (a->started) {
-		a->client->lpVtbl->Start(a->client);
+		// Already running: starting it again is a call the sound's thread
+		// makes every turn, and it is not the work of one of them.
 		return 0;
 	}
 	// Fill the buffer before starting, so the sound does not crackle at once.
@@ -411,7 +420,14 @@ static int audio_play(Audio *a) {
 
 static void audio_pause(Audio *a) {
 	audio_apartment();
-	if (a->started) a->client->lpVtbl->Stop(a->client);
+	// Once: a stop carries the device's place back to zero, and one made
+	// again and again while the sound waits for its picture keeps setting
+	// the place it reports to zero — the playhead of a start then jumps
+	// as the device settles, and the picture with it.
+	if (a->started) {
+		a->client->lpVtbl->Stop(a->client);
+		a->started = 0;
+	}
 }
 
 // audio_probe writes what the device clock says against what the software
@@ -497,7 +513,10 @@ static int64_t audio_position(Audio *a) {
 static int64_t audio_delay_us(Audio *a) {
 	audio_apartment();
 	UINT32 pad = 0;
-	if (!a->started || FAILED(a->client->lpVtbl->GetCurrentPadding(a->client, &pad)))
+	// The padding is there whether or not the device runs: a sound filled
+	// before it starts holds its frames, and reading that as none makes a
+	// full buffer look like one that starved.
+	if (FAILED(a->client->lpVtbl->GetCurrentPadding(a->client, &pad)))
 		return 0;
 	return (int64_t)pad * 1000000 / (UINT32)a->rate;
 }
@@ -567,7 +586,11 @@ static int audio_seek(Audio *a, int64_t us) {
 
 // audio_trace writes what the device reports, for the sync that does not hold.
 static void audio_trace(Audio *a, const char *what, int n) {
-	FILE *f = fopen("C:\\Users\\superman\\AppData\\Local\\Temp\\mygo-audio-c.log", "a");
+	const char *tmp = getenv("TEMP");
+	if (!tmp) return;
+	char path[512];
+	snprintf(path, sizeof(path), "%s\\mygo-audio-c.log", tmp);
+	FILE *f = fopen(path, "a");
 	if (!f) return;
 	UINT32 pad = 0;
 	if (a->client) a->client->lpVtbl->GetCurrentPadding(a->client, &pad);

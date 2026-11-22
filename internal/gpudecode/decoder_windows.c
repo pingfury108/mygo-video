@@ -100,6 +100,9 @@ static int dec_open(Dec *d, const char *url, const char *headers) {
 	d->dec = avcodec_alloc_context3(codec);
 	if (!d->dec) return -5;
 	if (avcodec_parameters_to_context(d->dec, d->par) < 0) return -6;
+	// The decoder hands a picture's own timestamp back in this time base.
+	// mpv sets it for the same (vd_lavc.c: avctx->pkt_timebase).
+	d->dec->pkt_timebase = d->fmt->streams[d->stream]->time_base;
 	DLOG("making the d3d11 device\n");
 	if (av_hwdevice_ctx_create(&d->hw, AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, 0) < 0) return -7;
 	DLOG("d3d11 device %p, opening codec\n", (void *)d->hw);
@@ -126,7 +129,11 @@ static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
 		int r = avcodec_receive_frame(d->dec, d->frame);
 		if (r == 0) {
 			*fmt = (int)d->frame->format;
-			*pts = d->frame->pts;
+			// best_effort_timestamp is the picture's place even where the
+			// container gave only a decode timestamp, which mpv reads too
+			// (vd_lavc.c: mp_pts_from_av(pic->best_effort_timestamp)).
+			*pts = d->frame->best_effort_timestamp;
+			if (*pts == AV_NOPTS_VALUE) *pts = d->frame->pts;
 			if (d->frame->format == AV_PIX_FMT_D3D11) {
 				*tex = d->frame->data[0];
 				*index = (int)(intptr_t)d->frame->data[1];
@@ -192,9 +199,11 @@ static void dec_skip(Dec *d, int on) {
 	LeaveCriticalSection(&d->cs);
 }
 
-// dec_picture converts the picture last decoded into the BGRA texture the
-// renderer reads, and returns its NT handle and the texture's size.
-static int dec_picture(Dec *d, uintptr_t *handle, int *w, int *h) {
+// dec_picture converts the picture last decoded into the BGRA texture of a
+// slot the engine holds for it, and returns its NT handle and the texture's
+// size. Each queued picture keeps a slot of its own, so a picture decoded
+// later cannot change the one the screen is showing.
+static int dec_picture(Dec *d, int slot, uintptr_t *handle, int *w, int *h) {
 	EnterCriticalSection(&d->cs);
 	if (!d->lastTex) {
 		LeaveCriticalSection(&d->cs);
@@ -212,7 +221,7 @@ static int dec_picture(Dec *d, uintptr_t *handle, int *w, int *h) {
 		d->convReady = 1;
 	}
 	HANDLE hnd = NULL;
-	int rc = conv_blit(&d->conv, (ID3D11Texture2D *)d->lastTex, d->lastIndex, &hnd);
+	int rc = conv_blit(&d->conv, (ID3D11Texture2D *)d->lastTex, d->lastIndex, slot, &hnd);
 	LeaveCriticalSection(&d->cs);
 	if (rc) return rc;
 	*handle = (uintptr_t)hnd;

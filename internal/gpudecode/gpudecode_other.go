@@ -31,7 +31,7 @@ func (p *Decoder) Next() (Frame, error) { return Frame{}, ErrUnsupported }
 var _ = time.Second
 
 // Picture reports that the GPU decoder is not wired here.
-func (p *Decoder) Picture() (uintptr, int, int, error) { return 0, 0, 0, ErrUnsupported }
+func (p *Decoder) Picture(slot int) (uintptr, int, int, error) { return 0, 0, 0, ErrUnsupported }
 
 // FPS is the video's nominal rate.
 func (p *Decoder) FPS() float64 { return 25 }

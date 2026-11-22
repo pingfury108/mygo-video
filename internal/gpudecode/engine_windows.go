@@ -18,30 +18,118 @@ import (
 // counts the seeks, so a picture decoded for a place the playback has left
 // is dropped rather than measured against the new one.
 type winFrames struct {
-	mu     sync.Mutex
-	d      *Decoder
-	anchor *int64 // the PTS the offsets count from, in microseconds
-	seekUs int64  // where the last seek put the playhead, in microseconds
+	mu sync.Mutex
+	d  *Decoder
+	// seekUs is where the last seek put the playhead, and seeked says there
+	// was one: a seek to zero is still a seek, and must not be taken for
+	// the start of the film.
+	seekUs int64
+	seeked bool
 	gen    int64
+	// busy marks the picture slots the engine still holds, and next is the
+	// slot after the last one taken: slots come round in turn, so one a
+	// picture just left is not filled again until the others have been.
+	busy [pictureSlots]bool
+	next int
+	// held maps a picture's texture handle to the slot it was converted
+	// into, for Release.
+	held map[uintptr]pictureHold
+}
+
+// pictureHold is the slot a picture took, and the surface that says it is
+// still the same picture when Release comes: a stale release must not free
+// a slot the decoder has since given to another frame.
+type pictureHold struct {
+	slot    int
+	surface any
+}
+
+// pictureSlots is how many pictures may stand converted at once. The engine
+// queues a few pictures ahead of the sound, and each needs a texture of its
+// own; two slots beyond that are kept for a picture the window is still
+// reading as the decoder comes round to it.
+// It must match CONV_SLOTS in bgra_windows.c.
+const pictureSlots = 8
+
+func newWinFrames(d *Decoder) *winFrames {
+	return &winFrames{d: d, held: map[uintptr]pictureHold{}}
+}
+
+// takeSlot finds a slot for a picture, or reports that every one is held.
+func (w *winFrames) takeSlot() (int, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i := 0; i < pictureSlots; i++ {
+		s := (w.next + i) % pictureSlots
+		if !w.busy[s] {
+			w.busy[s] = true
+			w.next = (s + 1) % pictureSlots
+			return s, true
+		}
+	}
+	return 0, false
+}
+
+// freeSlot gives a slot back, for a picture that failed before the engine
+// could hold it.
+func (w *winFrames) freeSlot(slot int) {
+	w.mu.Lock()
+	w.busy[slot] = false
+	w.mu.Unlock()
+}
+
+// Capacity is how many pictures the engine may queue: the slots less the two
+// the window may still be reading.
+func (w *winFrames) Capacity() int { return pictureSlots - 2 }
+
+// Release gives back the slot a shown or dropped picture occupied. The
+// surface is not changed: the window may still be drawing the picture as
+// the decoder comes round to the slot.
+func (w *winFrames) Release(p ui.VideoPicture) {
+	if p.Surface == nil {
+		return
+	}
+	w.mu.Lock()
+	if h, ok := w.held[p.Surface.Native]; ok && h.surface == p.Surface {
+		delete(w.held, p.Surface.Native)
+		w.busy[h.slot] = false
+	}
+	w.mu.Unlock()
 }
 
 func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
+	slot, ok := w.takeSlot()
+	if !ok {
+		return ui.VideoPicture{}, 0, errNoSlot
+	}
 	w.mu.Lock()
-	gen, anchor := w.gen, w.anchor
+	gen, seeked, seekUs := w.gen, w.seeked, w.seekUs
 	w.mu.Unlock()
 
 	f, err := w.d.Next()
 	if err != nil {
+		w.freeSlot(slot)
 		return ui.VideoPicture{}, 0, err
 	}
 	if !f.OnGPU {
+		w.freeSlot(slot)
 		return ui.VideoPicture{}, 0, errors.New("gpudecode: picture not on the GPU")
 	}
-	handle, bw, bh, err := w.d.Picture()
+	// A seek came while this one decoded: its place belongs to where the
+	// playback no longer is, and it is not worth a conversion.
+	w.mu.Lock()
+	stale := w.gen != gen
+	w.mu.Unlock()
+	if stale {
+		w.freeSlot(slot)
+		return ui.VideoPicture{}, 0, errStale
+	}
+	handle, bw, bh, err := w.d.Picture(slot)
 	if err != nil {
 		// A picture that carries no texture is the one the decoder flushed
 		// after a seek, before it decoded a fresh one: it is passed over and
 		// the next is decoded, rather than ending the whole playback.
+		w.freeSlot(slot)
 		return ui.VideoPicture{}, 0, errStale
 	}
 	// The handle is the key the renderer caches the opened texture by: two
@@ -54,41 +142,45 @@ func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
 		// A seek came while this one decoded: its place belongs to where the
 		// playback no longer is, and its PTS must not anchor the new place.
 		w.mu.Unlock()
+		w.freeSlot(slot)
 		return ui.VideoPicture{}, 0, errStale
 	}
 	if tb > 0 {
 		ptsUs := int64(float64(f.PTS) * tb * 1e6)
-		if w.seekUs > 0 {
+		if seeked {
 			// A seek landed on the picture the index holds before the place
 			// asked for: one before it shows before its time, and the engine
 			// passes those over, so both the picture and the sound start
 			// from the place the seek asked for.
-			off = time.Duration(ptsUs-w.seekUs) * time.Microsecond
+			off = time.Duration(ptsUs-seekUs) * time.Microsecond
 		} else {
-			if anchor == nil {
-				w.anchor = &ptsUs
-			}
-			off = time.Duration(ptsUs-*w.anchor) * time.Microsecond
+			// The film's own timeline, not a timeline made by subtracting
+			// the first picture's PTS: the sound is on the film's timeline,
+			// and a title whose first picture does not start at zero must
+			// stay where its timestamp puts it.
+			off = time.Duration(ptsUs) * time.Microsecond
 		}
 	}
+	pic := ui.NewTexturePicture(handle, uint64(handle), bw, bh)
+	w.held[handle] = pictureHold{slot: slot, surface: pic.Surface}
 	w.mu.Unlock()
-	return ui.NewTexturePicture(handle, uint64(handle), bw, bh), off, nil
+	return pic, off, nil
 }
 
 func (w *winFrames) Seek(d time.Duration) error {
 	w.mu.Lock()
 	w.gen++
-	w.anchor = nil
 	w.seekUs = d.Microseconds()
+	w.seeked = true
 	w.mu.Unlock()
 	return w.d.Seek(d)
 }
 
-func (w *winFrames) SetSkip(on bool)        { w.d.Skip(on) }
-func (w winFrames) Duration() time.Duration { return w.d.Duration() }
-func (w winFrames) Size() (int, int)        { return w.d.Size() }
-func (w winFrames) Close() error            { return w.d.Close() }
-func (w winFrames) Step() time.Duration {
+func (w *winFrames) SetSkip(on bool)         { w.d.Skip(on) }
+func (w *winFrames) Duration() time.Duration { return w.d.Duration() }
+func (w *winFrames) Size() (int, int)        { return w.d.Size() }
+func (w *winFrames) Close() error            { return w.d.Close() }
+func (w *winFrames) Step() time.Duration {
 	if f := w.d.FPS(); f > 0 {
 		return time.Duration(float64(time.Second) / f)
 	}
@@ -137,9 +229,13 @@ func (e *Engine) open(url string, headers []string) {
 	e.mu.Lock()
 	startAt := e.at
 	e.mu.Unlock()
+	nf := newWinFrames(d)
 	if startAt > 0 {
 		audioLog(fmt.Sprintf("video seek to %v", startAt))
-		if err := d.Seek(startAt); err != nil {
+		// The engine already stands at startAt, so the pictures of the seek
+		// count from there: without this the first picture's own timestamp
+		// would be added to the place again.
+		if err := nf.Seek(startAt); err != nil {
 			audioLog("video seek: " + err.Error())
 		}
 	}
@@ -152,7 +248,7 @@ func (e *Engine) open(url string, headers []string) {
 		audioLog("audio: " + aerr.Error())
 	}
 	e.mu.Lock()
-	e.src = &winFrames{d: d}
+	e.src = nf
 	e.snd = snd
 	wake := e.wake
 	e.mu.Unlock()

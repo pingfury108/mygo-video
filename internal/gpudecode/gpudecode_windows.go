@@ -105,12 +105,14 @@ func headerLines(h []string) string {
 	return out
 }
 
-// Picture converts the picture last decoded into the BGRA texture the
-// renderer reads, and returns its NT handle and the texture's size.
-func (p *Decoder) Picture() (uintptr, int, int, error) {
+// Picture converts the picture last decoded into the BGRA texture of a
+// picture slot, and returns its NT handle and the texture's size. Each
+// queued picture takes a slot of its own: one texture for all of them would
+// show the newest decode, not the picture the engine chose.
+func (p *Decoder) Picture(slot int) (uintptr, int, int, error) {
 	var hnd C.uintptr_t
 	var w, h C.int
-	if rc := C.dec_picture(&p.d, &hnd, &w, &h); rc != 0 {
+	if rc := C.dec_picture(&p.d, C.int(slot), &hnd, &w, &h); rc != 0 {
 		return 0, 0, 0, fmt.Errorf("gpudecode: picture at step %d", int(rc))
 	}
 	return uintptr(hnd), int(w), int(h), nil

@@ -113,8 +113,10 @@ func main() {
 		if time.Now().After(next) {
 			next = next.Add(time.Second)
 			s := e.Stat(time.Now())
-			drift := s.Audio - s.Real
-			fmt.Printf("real=%6.2fs audio=%6.2fs video=%6.2fs drift=%+7.3fs queue=%d state=%d err=%v\n",
+			// The difference of the two places is the sync itself: a picture
+			// standing ahead of the sound shows sound that has not been heard.
+			drift := s.Video - s.Audio
+			fmt.Printf("real=%6.2fs audio=%8.2fs video=%8.2fs drift=%+8.3fs queue=%d state=%d err=%v\n",
 				s.Real.Seconds(), s.Audio.Seconds(), s.Video.Seconds(), drift.Seconds(), s.Queue, s.State, s.Err)
 		}
 		// A fine look at the gap: a sawtooth from zero to one frame is the

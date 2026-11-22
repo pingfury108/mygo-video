@@ -27,6 +27,11 @@ import (
 // against the new one, which puts it seconds away from where it belongs.
 var errStale = errors.New("gpudecode: stale picture")
 
+// errNoSlot says every picture slot is in use: the pictures queued ahead of
+// the sound have not been shown or dropped yet, so there is nowhere to
+// convert the next one until they are.
+var errNoSlot = errors.New("gpudecode: every picture slot is in use")
+
 // frames is what decodes the pictures, one after another. Next hands over
 // the picture and how long after where the seek or the start put us it
 // shows — its own PTS in time, which a variable frame rate needs.
@@ -46,6 +51,11 @@ type frames interface {
 	// reference frames, which a playhead far behind the sound uses to catch
 	// up fast.
 	SetSkip(on bool)
+	// Release gives back the slot a picture occupied, once the engine has
+	// shown it or dropped it. A decoder that converts several pictures
+	// ahead needs one texture per picture, and those textures are reused
+	// only here.
+	Release(p ui.VideoPicture)
 	// Close releases the decoder.
 	Close() error
 }
@@ -88,9 +98,18 @@ type Engine struct {
 	// audioAt is when the device last reported, which the playhead is
 	// carried from by the wall clock: the report is whole periods apart.
 	audioAt time.Time
-	clock   time.Time // when playback began, zero while paused
-	paused  bool
-	rate    float64
+	// audioStep is how far apart the device's reports come, kept as it
+	// reports: the playhead is carried on the wall clock no further than
+	// that, for a device that stopped reporting stopped playing too.
+	audioStep time.Duration
+	// reportAt is when the device last reported, which the step of its
+	// reports is read off, kept apart from audioAt, the place the playhead
+	// is carried from: a report that repeats a place moves neither, and the
+	// step is of the reports, not of the places they name.
+	reportAt time.Time
+	clock    time.Time // when playback began, zero while paused
+	paused   bool
+	rate     float64
 	// sndSeek is a seek for the thread that owns the device to make: the
 	// call reads the source and must not hold the window.
 	sndSeek *time.Duration
@@ -106,6 +125,13 @@ type Engine struct {
 	// the keyframe takes — mpv holds its audio for that (audio.c:
 	// audio_start_ao's delaying_audio_start).
 	starting bool
+	// reanchor tells the place the device reports next is to be taken as it
+	// is, however far from the playhead it lies. The device counts from the
+	// moment it runs, and the sound of a start is stopped while the picture
+	// decodes: its place goes back to zero, and a playhead reading that as
+	// the device falling behind steps itself back by the whole of the wait —
+	// a start that jumps, and the picture with it.
+	reanchor bool
 	// seekSeq numbers the seeks: a drag sends many, and only the last is
 	// worth the decoder's while, as mpv merges its seeks.
 	seekSeq int64
@@ -153,6 +179,10 @@ type Engine struct {
 	// when the picture now showing went up, read together.
 	shownVideo, shownAudio time.Duration
 	shown                  bool
+	// returned is the picture last handed to the window. A jump empties the
+	// queue and changes the picture showing, and the window still has to be
+	// told it is another picture even with no queue entry to compare with.
+	returned ui.VideoPicture
 }
 
 // queued is a picture and where it shows.
@@ -249,7 +279,11 @@ func (e *Engine) runSound() {
 		e.snd.Play()
 		n := e.snd.Fill()
 		if n <= 0 {
-			// Nothing was written: the sound is over, or the source stalled.
+			// Nothing was written. A device whose buffer is still full is
+			// one the writing waits on, not one that starved: its fills
+			// write nothing while the sound it holds plays. The buffer is
+			// read here, outside the lock, for the same reason the place is.
+			held := e.snd.Delay()
 			// A device that drives the writing gave its own wait already.
 			time.Sleep(5 * time.Millisecond)
 			// A source that went quiet for a long stretch stalls the sound the
@@ -258,8 +292,15 @@ func (e *Engine) runSound() {
 			// mpv resets its audio for the same (audio.c: reset_audio_state on
 			// underrun).
 			e.mu.Lock()
-			if !e.stopped && !e.starting {
+			// Only a buffer with room left that the source cannot fill is a
+			// stall: a full one is the sound waiting its turn, and a start
+			// fills it before the device runs. Counting those stood the
+			// playhead back on itself — a start that jumped.
+			if !e.stopped && !e.starting && held < 150*time.Millisecond {
 				e.stall++
+				if e.stall%20 == 0 {
+					frameLog(fmt.Sprintf("stall %d held %v audioPos %.3f", e.stall, held, e.audioPos.Seconds()))
+				}
 				if e.stall > 120 { // a minute of failed fills
 					e.stall = 0
 					e.at = e.posLocked(time.Now())
@@ -295,27 +336,45 @@ func (e *Engine) runSound() {
 			// Not once the playback is paused: the place it stopped at is the
 			// last the device reported, and a read that lands after the pause
 			// would move the picture on past where it stands.
-			if !e.paused && !e.sndPending {
-				// The device reports whole periods, a little behind the
-				// sound each time: taking it as it comes would step the
-				// playhead back by up to a period on every report, and the
-				// picture would step with it. The playhead only moves on
-				// from where it is, and takes the report when the two have
-				// drifted apart for good.
+			if !e.paused && !e.sndPending && !e.starting {
 				now := time.Now()
-				predicted := e.audioPos
-				if !e.audioAt.IsZero() {
-					predicted += time.Duration(float64(now.Sub(e.audioAt)) * e.rate)
+				if e.reanchor {
+					frameLog(fmt.Sprintf("reanchor p %.3f audioPos %.3f", p.Seconds(), e.audioPos.Seconds()))
 				}
-				// A report further ahead of the playhead than the sound moves
-				// in a second is not the device moving on: it is a place read
-				// before a seek landed, and taking it carries the playhead
-				// there and the picture with it. sndPending above is what
-				// keeps such a report out: past it the device is where it says.
-				if p > predicted || predicted-p > 60*time.Millisecond {
+				if e.reanchor && p > 0 {
+					// The sound has just started where the picture is: the
+					// device counts from there, and this is where it stands.
+					// A device that has not moved yet says nothing of where
+					// it is, and anchoring the playhead at that zero runs it
+					// ahead on the wall clock until the first report, which
+					// then looks like the sound falling back.
 					e.audioPos = p
+					e.audioAt = now
+					e.reanchor = false
+				} else if p > e.audioPos {
+					// The sound moves on and never back. A device naming a
+					// place behind the one it named before is settling as it
+					// runs, or reading a place from before a seek landed, and
+					// following it steps the playhead and the picture back
+					// with it: the wall clock carries the playhead until the
+					// device is past again.
+					e.audioPos = p
+					e.audioAt = now
 				}
-				e.audioAt = now
+				// How far apart the reports come, which is how far the playhead
+				// may be carried past the last of them: kept whether or not
+				// this one moved it, for a device that repeats a place while it
+				// runs still reports at its own pace.
+				if !e.reportAt.IsZero() {
+					if d := now.Sub(e.reportAt); d > 0 && d < 200*time.Millisecond {
+						if e.audioStep == 0 {
+							e.audioStep = d
+						} else {
+							e.audioStep = (e.audioStep*7 + d) / 8
+						}
+					}
+				}
+				e.reportAt = now
 				// The sound the device holds is what the pictures already
 				// handed over stand against.
 				e.sndDelay = d
@@ -361,11 +420,12 @@ func (e *Engine) fill() {
 			e.mu.Unlock()
 			return
 		}
-		src, paused, queueLen := e.src, e.paused, len(e.queue)
+		src, paused, queueLen, seekSeq := e.src, e.paused, len(e.queue), e.seekSeq
 		e.mu.Unlock()
-		// Keep about a second of video ready, as deep as the sound's buffer:
-		// a shallower queue makes the picture stall before the sound does on
-		// a slow source, and the two come apart.
+		// Keep the pictures the decoder can hold ready. The GPU path converts
+		// each one into a texture of its own, and has only a few slots; a
+		// source slow enough to starve them still drops frames against the
+		// sound below, rather than letting the picture drift away from it.
 		step := 40 * time.Millisecond
 		if src != nil {
 			if d := src.Step(); d > 0 {
@@ -375,6 +435,14 @@ func (e *Engine) fill() {
 		ahead := int((1100 * time.Millisecond) / step)
 		if ahead < 12 {
 			ahead = 12
+		}
+		// A decoder that converts each picture into a texture of its own
+		// holds only so many: past them there is nowhere for the next
+		// picture to go until the window has shown one.
+		if c, ok := src.(interface{ Capacity() int }); ok {
+			if n := c.Capacity(); n > 0 && ahead > n {
+				ahead = n
+			}
 		}
 		if queueLen >= ahead || paused || src == nil {
 			// This is the worker that keeps the queue full, not the scheduler:
@@ -392,6 +460,12 @@ func (e *Engine) fill() {
 			// the playback no longer is.
 			continue
 		}
+		if errors.Is(err, errNoSlot) {
+			// Every picture slot is still shown or queued: wait for the
+			// window to release one, rather than filling anything else.
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
 		if errors.Is(err, io.EOF) {
 			e.mu.Lock()
 			e.ended = true
@@ -407,12 +481,21 @@ func (e *Engine) fill() {
 			return
 		}
 		e.mu.Lock()
+		// A seek came while this picture decoded: it belongs to the place
+		// the playback has left, even where the decoder has not been sent
+		// there yet. The seek's own pictures come after it.
+		if seekSeq != e.seekSeq {
+			e.mu.Unlock()
+			releasePictures(src, pic)
+			continue
+		}
 		// A seek lands before the place asked for, and the pictures of that
 		// place belong to where the playhead no longer is: they are decoded
 		// past, not shown, so the picture starts where the seek asked for, as
 		// the sound does.
 		if off < 0 {
 			e.mu.Unlock()
+			releasePictures(src, pic)
 			continue
 		}
 		// The playhead ran past everything ready by a wide margin: a jump
@@ -420,10 +503,19 @@ func (e *Engine) fill() {
 		// every one of the ones it passed.
 		lag := e.posLocked(time.Now()) - (e.base + off)
 		if lag > lagJump {
+			oldQueue, oldCurrent := e.queue, e.current
 			e.queue = nil
 			e.current = pic
 			e.last = e.base + off
 			e.mu.Unlock()
+			pics := make([]ui.VideoPicture, 0, len(oldQueue)+1)
+			for _, q := range oldQueue {
+				pics = append(pics, q.pic)
+			}
+			if oldCurrent.Surface != nil {
+				pics = append(pics, oldCurrent)
+			}
+			releasePictures(src, pics...)
 			frameLog(fmt.Sprintf("jump picture %.3f lag %v (pos %.3f)", e.last.Seconds(), lag, e.last.Seconds()+lag.Seconds()))
 			e.wakeNow()
 			// Stand on this picture for its step: without the pause the loop
@@ -445,13 +537,40 @@ func (e *Engine) fill() {
 		e.state = ui.VideoReady
 		e.step = step
 		// A picture of the new place is ready, and the sound may start
-		// there with it.
-		e.starting = false
+		// there with it: the device is about to run, and its first report is
+		// the place it starts counting from. Only the picture that ends the
+		// wait asks for that: every picture after it would ask again, and a
+		// report taken as it comes every frame is the playhead following the
+		// device's own settling from step to step.
+		if e.starting {
+			e.starting = false
+			e.reanchor = true
+		}
 		wk := e.wake
 		e.mu.Unlock()
 		if wk != nil {
 			wk()
 		}
+	}
+}
+
+// releasePictures gives back the slots of pictures the engine will not show
+// again. A picture may stand in the queue and as the one showing at once, so
+// the same texture is given back once.
+func releasePictures(src frames, pics ...ui.VideoPicture) {
+	if src == nil {
+		return
+	}
+	seen := make(map[uintptr]bool, len(pics))
+	for _, p := range pics {
+		if p.Surface == nil || p.Surface.Native == 0 {
+			continue
+		}
+		if seen[p.Surface.Native] {
+			continue
+		}
+		seen[p.Surface.Native] = true
+		src.Release(p)
 	}
 }
 
@@ -514,7 +633,9 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 		// where it stands, and a seek asks what the sound is doing long
 		// before the queue has anything in it.
 		pos = e.posLocked(t)
-		return e.current, false, e.current.Surface != nil
+		changed := e.current.Surface != e.returned.Surface
+		e.returned = e.current
+		return e.current, changed, e.current.Surface != nil
 	}
 	// How often the window asks for a picture: the lead above is meant to
 	// cover that wait, and the log says what it really is.
@@ -547,28 +668,41 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 	// here showed a picture of pos+200ms at pos, a fifth of a second ahead.
 	iff := pos + e.leadLocked()
 	// Drop every picture the playhead passed, keeping the one showing.
+	var gone []ui.VideoPicture
 	for len(e.queue) > 1 && e.queue[1].at <= iff {
+		gone = append(gone, e.queue[0].pic)
 		e.queue = e.queue[1:]
 	}
 	if e.queue[0].at <= iff {
-		changed := e.current.Surface != e.queue[0].pic.Surface
-		e.current = e.queue[0].pic
+		next := e.queue[0].pic
+		changed := next.Surface != e.returned.Surface
+		if e.current.Surface != nil && e.current.Surface != next.Surface {
+			gone = append(gone, e.current)
+		}
+		e.current = next
 		e.last = e.queue[0].at
 		e.shownVideo, e.shownAudio, e.shown = e.last, pos, true
 		if len(e.queue) > 1 {
 			e.queue = e.queue[1:]
 		}
+		// The pictures the playhead passed keep their textures until here:
+		// releasing them lets the decoder convert the next ones into them.
+		releasePictures(e.src, gone...)
+		e.returned = e.current
 		return e.current, changed, true
 	}
 	if e.current.Surface == nil {
 		e.current = e.queue[0].pic
 		e.last = e.queue[0].at
 		e.shownVideo, e.shownAudio, e.shown = e.last, pos, true
+		e.returned = e.current
 		return e.current, true, true
 	}
 	// No picture is due: the one showing stands until its step is spent,
 	// and leadLocked reads what is left of it off the clock.
-	return e.current, false, true
+	changed := e.current.Surface != e.returned.Surface
+	e.returned = e.current
+	return e.current, changed, true
 }
 
 // avOffset is how far the picture is moved against the sound, read from a
@@ -744,8 +878,30 @@ func (e *Engine) posLocked(t time.Time) time.Duration {
 		// playhead passes through, and the wall clock carries it from there
 		// until the device reports again, as mpv reads the sound's delay
 		// once and then sleeps the time it has left.
+		//
+		// Only as far as the reports come, though: a device that has stopped
+		// reporting has stopped playing, and a playhead carried on the wall
+		// clock past that runs ahead of the sound by the whole of the wait —
+		// then drops back the moment a report comes, which is a start that
+		// jumps.
 		if !e.audioAt.IsZero() {
-			pos += time.Duration(float64(t.Sub(e.audioAt)) * e.rate)
+			d := t.Sub(e.audioAt)
+			// No more than the reports come: a device that stopped reporting
+			// stopped playing, and the playhead carried on the wall clock
+			// past that runs ahead of the sound by the whole of the wait.
+			// Before the first report names the step it takes, one period of
+			// the device stands in — a playhead frozen until then would stop
+			// the picture between two reports.
+			limit := 2 * e.audioStep
+			if limit <= 0 {
+				limit = 40 * time.Millisecond
+			}
+			if d > limit {
+				d = limit
+			}
+			if d > 0 {
+				pos += time.Duration(float64(d) * e.rate)
+			}
 		}
 		return pos
 	}
@@ -847,6 +1003,7 @@ func (e *Engine) Pause() {
 // Seek goes to d, restarting the decoder and the sound there.
 func (e *Engine) Seek(d time.Duration) {
 	e.mu.Lock()
+	oldQueue, oldCurrent := e.queue, e.current
 	e.queue = nil
 	e.at = d
 	e.base = d
@@ -858,6 +1015,7 @@ func (e *Engine) Seek(d time.Duration) {
 	e.audioAt = time.Time{}
 	e.audioEndedAt = time.Time{}
 	e.current = ui.VideoPicture{}
+	e.returned = ui.VideoPicture{}
 	src, snd := e.src, e.snd
 	if snd != nil {
 		e.sndSeek = &d
@@ -876,6 +1034,19 @@ func (e *Engine) Seek(d time.Duration) {
 	e.seekSeq++
 	seq := e.seekSeq
 	e.mu.Unlock()
+	if src != nil {
+		// The pictures of the place left behind still hold their slots:
+		// give them back before the decoder converts the pictures of the
+		// new place.
+		pics := make([]ui.VideoPicture, 0, len(oldQueue)+1)
+		for _, q := range oldQueue {
+			pics = append(pics, q.pic)
+		}
+		if oldCurrent.Surface != nil {
+			pics = append(pics, oldCurrent)
+		}
+		releasePictures(src, pics...)
+	}
 	if src != nil {
 		go func() {
 			e.mu.Lock()
@@ -916,8 +1087,19 @@ func (e *Engine) Close() error {
 	e.mu.Lock()
 	e.stopped = true
 	src, snd := e.src, e.snd
+	queue, current := e.queue, e.current
 	e.mu.Unlock()
 	e.wg.Wait()
+	if src != nil {
+		pics := make([]ui.VideoPicture, 0, len(queue)+1)
+		for _, q := range queue {
+			pics = append(pics, q.pic)
+		}
+		if current.Surface != nil {
+			pics = append(pics, current)
+		}
+		releasePictures(src, pics...)
+	}
 	if snd != nil {
 		snd.Close()
 	}
@@ -946,15 +1128,16 @@ func (e *Engine) Stat(now time.Time) Stats {
 		// What the engine plays by, not a read of the device: the device
 		// still reports the place before a seek until the seek reaches it,
 		// and this is called while holding the lock.
-		s.Audio = e.audioPos
+		s.Audio = e.at + e.audioPos
 	}
 	if !e.clock.IsZero() {
 		s.Real = now.Sub(e.clock)
 	}
 	if e.current.Surface != nil {
-		// Both stand where the playhead began, as the sound does: the sound of a
-		// device counts from its start, not from the file's.
-		s.Video = e.last - e.at
+		// Both on the file's own timeline, as the sound is now: a check that
+		// lines them up compares two places of the film, not one place and
+		// one stretch from a seek.
+		s.Video = e.last
 	}
 	return s
 }
