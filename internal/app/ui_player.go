@@ -23,6 +23,12 @@ var rates = []float64{0.5, 0.75, 1, 1.25, 1.5, 2}
 func (a *app) playerPage(c *ui.Context) {
 	a.tick()
 	pl := a.player
+	// mpv plays in a window of its own: this page has nothing to draw
+	// under it, and the page the video was chosen from goes back up.
+	if pl == nil {
+		a.leavePlayer()
+		return
+	}
 
 	c.OnShortcut(0, ui.KeyEscape, a.leavePlayer)
 	c.OnShortcut(0, ui.KeySpace, a.togglePlay)
@@ -398,7 +404,9 @@ func (a *app) subtitleLayer(c *ui.Context) {
 	if !a.subsOn || len(a.subs) == 0 || a.player == nil {
 		return
 	}
-	text := subtitle.At(a.subs, a.player.Position())
+	// The whole file's time, not the player's: a WebDAV remux starts its
+	// own clock at the place it was asked for, and its cues are the file's.
+	text := subtitle.At(a.subs, a.playhead())
 	if text == "" {
 		return
 	}

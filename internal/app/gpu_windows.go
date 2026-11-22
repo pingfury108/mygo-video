@@ -20,7 +20,13 @@ func (a *app) gpuPlayer(it media.Item) (*ui.VideoPlayer, bool) {
 	if url == "" {
 		return nil, false
 	}
-	e, err := gpudecode.NewEngine(url, nil)
+	// The server asks for its authorization on every read: the decoder
+	// opens the file itself, so the proxy's header is not there to lean on.
+	var headers []string
+	if h := headerArg(a.webdavAuth()); h != "" {
+		headers = []string{h}
+	}
+	e, err := gpudecode.NewEngine(url, headers)
 	if err != nil {
 		a.diag("gpu engine: %v", err)
 		return nil, false

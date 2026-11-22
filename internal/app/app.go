@@ -98,6 +98,16 @@ type app struct {
 	// hevcExt is whether Microsoft's HEVC decoder is installed, checked once.
 	hevcExt        bool
 	hevcExtChecked bool
+	// hevcProbe remembers what ffmpeg said of a stream, so a retry does
+	// not open it again over the network.
+	hevcProbe map[string]bool
+	// webdavGPUFailed says the GPU decoder did not open a video of the
+	// server: the ways in after it are tried for this item, and a drag
+	// does not open it again on every seek.
+	webdavGPUFailed map[string]bool
+	// playSeq numbers the play requests a plugin answers apart: one that
+	// took its time must not open over the video chosen after it.
+	playSeq int
 	// errLogged is the item whose player error is already in the log.
 	errLogged string
 
@@ -389,6 +399,8 @@ func (a *app) start() {
 		}
 	}
 	a.retryStage = map[string]int{}
+	a.hevcProbe = map[string]bool{}
+	a.webdavGPUFailed = map[string]bool{}
 	a.diag("version=%s os=%s/%s", mygo.App.Version(), runtime.GOOS, runtime.GOARCH)
 	go a.logTools()
 	plugin.SetOpenURL(mygo.Shell.OpenExternal)
@@ -781,6 +793,9 @@ func itemFromVideo(source string, v media.Video) media.Item {
 
 // play opens an item, from the start or where the listener stopped.
 func (a *app) play(it media.Item, fromStart bool) {
+	a.playSeq++
+	// A play chosen again is tried the whole way in again, the GPU first.
+	delete(a.webdavGPUFailed, it.ID)
 	switch {
 	case it.Source == "webdav":
 		a.playWebDAV(it, fromStart)
@@ -921,9 +936,17 @@ func (a *app) playPlugin(it media.Item, fromStart bool) {
 		a.say("这个来源已经不在了")
 		return
 	}
+	seq := a.playSeq
 	go func() {
 		pb, err := p.Play(it.RemoteID, a.quality)
-		mygo.RunOnMain(func() { a.openPlayback(it, pb, err, fromStart) })
+		mygo.RunOnMain(func() {
+			// The listener chose another video while this plugin took
+			// its time: the answer belongs to a playback left behind.
+			if a.playSeq != seq {
+				return
+			}
+			a.openPlayback(it, pb, err, fromStart)
+		})
 	}()
 }
 
@@ -1033,6 +1056,28 @@ func (a *app) canRetry() bool {
 // transcoded to H.264, for a file the system's player has no decoder for.
 func (a *app) retryPlayback() {
 	s := a.retryStream
+	// The GPU decoder failed on this file: mpv is the next way in, and
+	// the one known to keep a 4K picture with its sound, when this build
+	// ships it. It takes the file in a window of its own.
+	if a.avTune != nil && a.playMPV(a.playing, a.playhead()) {
+		if a.playing.Source == "webdav" {
+			// A drag while this plays asks for the place in the file; the
+			// GPU is not tried again on every one of them.
+			a.webdavGPUFailed[a.playing.ID] = true
+		}
+		// mpv plays in a window of its own: this window goes back to the
+		// page the video was chosen from, rather than draw a player that
+		// has none.
+		a.leavePlayer()
+		return
+	}
+	webdav := a.playing.Source == "webdav"
+	if webdav && a.avTune != nil {
+		a.webdavGPUFailed[a.playing.ID] = true
+		// A remux starts where the film stands now, not where the playback
+		// that failed began.
+		s.Start = a.playhead()
+	}
 	if a.retryStage[a.playing.ID] >= 2 {
 		s.Type = "transcode"
 		s.VideoEncoder = a.pickVideoEncoder()
@@ -1055,7 +1100,16 @@ func (a *app) retryPlayback() {
 	a.closePlayer()
 	a.retryStream = s
 	a.proxyToken = token
-	a.beginPlayback(it, player, false)
+	if webdav {
+		// The remux begins at s.Start, and the player's own clock counts
+		// from there: the playhead is put back on the file's timeline.
+		a.webdavHLS = true
+		a.webdavBase = s.Start
+		a.beginPlayback(it, player, true)
+		a.probeWebDAVDuration(it)
+	} else {
+		a.beginPlayback(it, player, false)
+	}
 	a.diag("retried with %s: %s", s.Type, s.URL)
 }
 
@@ -1136,6 +1190,7 @@ func (a *app) closePlayer() {
 	a.stopLiveDanmaku()
 	a.player.Close()
 	a.player = nil
+	a.avTune = nil
 }
 
 // saveProgress writes where the video stands, at most what changed.
@@ -1312,7 +1367,13 @@ func (a *app) hevcNeedsTranscode(s streamproxy.Stream) bool {
 	if s.Type != "" && s.Type != "mp4" && s.Type != "remux" {
 		return false
 	}
-	args := []string{"-hide_banner"}
+	// The probe opens the stream over the network: one answer is kept for
+	// the retries, which would otherwise wait on it again.
+	key := s.Type + "\x00" + s.URL + "\x00" + headerArg(s.Headers)
+	if hevc, ok := a.hevcProbe[key]; ok {
+		return hevc
+	}
+	args := []string{"-hide_banner", "-rw_timeout", "15000000"}
 	if h := headerArg(s.Headers); h != "" {
 		args = append(args, "-headers", h)
 	}
@@ -1320,7 +1381,12 @@ func (a *app) hevcNeedsTranscode(s streamproxy.Stream) bool {
 	cmd := exec.Command(a.ffmpeg, args...)
 	executil.Hide(cmd)
 	out, _ := cmd.CombinedOutput()
-	return strings.Contains(string(out), "Video: hevc")
+	hevc := strings.Contains(string(out), "Video: hevc")
+	if len(a.hevcProbe) > 512 {
+		a.hevcProbe = map[string]bool{}
+	}
+	a.hevcProbe[key] = hevc
+	return hevc
 }
 
 func (a *app) diag(format string, args ...any) {

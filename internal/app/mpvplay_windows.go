@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mygo-video/internal/executil"
@@ -46,6 +47,12 @@ func (a *app) playMPV(it media.Item, start time.Duration) bool {
 	}
 	if it.Source == "webdav" {
 		args = append(args, "--no-config", "--cache=yes")
+		if h := headerArg(a.webdavAuth()); h != "" {
+			// mpv takes the headers as a comma-separated list; the join
+			// here leaves one CRLF after each line.
+			h = strings.ReplaceAll(strings.TrimSpace(h), "\r\n", ",")
+			args = append(args, "--http-header-fields="+h)
+		}
 	}
 	args = append(args, url)
 	cmd := exec.Command(bin, args...)

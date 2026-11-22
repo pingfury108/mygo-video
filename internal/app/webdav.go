@@ -181,11 +181,26 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	// The GPU decoder plays the file as it is, inside this window: the
 	// picture stays on the GPU, and the transcode below is only for the
 	// system's player, which has no HEVC decoder.
-	if p, ok := a.gpuPlayer(it); ok {
+	var gpu *ui.VideoPlayer
+	if !a.webdavGPUFailed[it.ID] {
+		gpu, _ = a.gpuPlayer(it)
+	}
+	if gpu != nil {
+		p := gpu
+		// The playhead is the player's own, on the file's timeline: a
+		// remux of the playback before it must not shift it again.
+		a.webdavHLS = false
+		a.webdavBase = 0
+		a.subs = nil
+		a.subsOn = false
+		a.retryStream = streamproxy.Stream{URL: it.RemoteID, Headers: a.webdavAuth(), Start: d}
 		if d > 0 {
 			p.Seek(d)
 		}
 		a.beginPlayback(it, p, true)
+		// A stream whose length its container does not carry: ffmpeg
+		// reads the segments and says how long it is.
+		a.probeWebDAVDuration(it)
 		return
 	}
 	// mpv plays it in a window of its own, where the sound keeps its clock.
@@ -237,6 +252,7 @@ func (a *app) probeWebDAVDuration(it media.Item) {
 		args = append(args, "-headers", h)
 	}
 	args = append(args, "-i", it.RemoteID)
+	id := it.ID
 	go func() {
 		cmd := exec.Command(ff, args...)
 		executil.Hide(cmd)
@@ -246,6 +262,11 @@ func (a *app) probeWebDAVDuration(it media.Item) {
 			return
 		}
 		mygo.RunOnMain(func() {
+			// The listener moved on while ffmpeg read: the length is of
+			// the video no longer playing.
+			if a.webdavDurationID != id {
+				return
+			}
 			a.webdavDuration = time.Duration(sec * float64(time.Second))
 			a.invalidate()
 		})
