@@ -409,6 +409,7 @@ func (e *Engine) fill() {
 			e.current = pic
 			e.last = e.base + off
 			e.mu.Unlock()
+			frameLog(fmt.Sprintf("jump picture %.3f lag %v (pos %.3f)", e.last.Seconds(), lag, e.last.Seconds()+lag.Seconds()))
 			e.wakeNow()
 			// Stand on this picture for its step: without the pause the loop
 			// spins for the lock and starves the window and the sound.
@@ -494,6 +495,10 @@ func (e *Engine) Frame(t time.Time) (ui.VideoPicture, bool, bool) {
 		}
 	}()
 	if len(e.queue) == 0 {
+		// The playhead still moves with no picture to show: the log says
+		// where it stands, and a seek asks what the sound is doing long
+		// before the queue has anything in it.
+		pos = e.posLocked(t)
 		return e.current, false, e.current.Surface != nil
 	}
 	// How often the window asks for a picture: the lead above is meant to
