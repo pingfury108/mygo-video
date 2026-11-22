@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mygo-video/internal/executil"
+	"mygo-video/internal/ffbin"
 )
 
 // Width is how wide a thumbnail is: enough for a card, a poster crop and a
@@ -101,6 +102,7 @@ func runURL(ctx context.Context, ffmpeg, at, raw string, headers map[string]stri
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	args := []string{"-y", "-loglevel", "error", "-rw_timeout", "15000000"}
+	args = append(args, ffbin.NoProxyArgs(raw)...)
 	if len(headers) > 0 {
 		var b strings.Builder
 		for k, v := range headers {

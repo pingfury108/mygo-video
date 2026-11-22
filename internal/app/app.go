@@ -1479,6 +1479,7 @@ func (a *app) hevcNeedsTranscode(s streamproxy.Stream) bool {
 		return hevc
 	}
 	args := []string{"-hide_banner", "-rw_timeout", "15000000"}
+	args = append(args, ffbin.NoProxyArgs(s.URL)...)
 	if h := headerArg(s.Headers); h != "" {
 		args = append(args, "-headers", h)
 	}
@@ -1520,6 +1521,7 @@ func (a *app) hevcSource(s streamproxy.Stream) bool {
 		return hevc
 	}
 	args := []string{"-hide_banner", "-rw_timeout", "8000000"}
+	args = append(args, ffbin.NoProxyArgs(s.URL)...)
 	if h := headerArg(s.Headers); h != "" {
 		args = append(args, "-headers", h)
 	}

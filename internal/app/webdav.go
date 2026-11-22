@@ -18,6 +18,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"mygo-video/internal/executil"
+	"mygo-video/internal/ffbin"
 	"mygo-video/internal/local"
 	"mygo-video/internal/media"
 	"mygo-video/internal/store"
@@ -271,6 +272,7 @@ func (a *app) probeStreamDuration(id, url string, headers map[string]string) {
 		return
 	}
 	args := []string{"-hide_banner", "-rw_timeout", "15000000"}
+	args = append(args, ffbin.NoProxyArgs(url)...)
 	if h := headerArg(headers); h != "" {
 		args = append(args, "-headers", h)
 	}

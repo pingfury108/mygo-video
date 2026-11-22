@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"mygo-video/internal/executil"
+	"mygo-video/internal/ffbin"
 )
 
 // Stream is what a source hands over to play.
@@ -474,6 +475,7 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 		args = append(args, "-hwaccel", hwaccelName())
 	}
 	addInput := func(u string) {
+		args = append(args, ffbin.NoProxyArgs(u)...)
 		if h := headerLines(s.Headers); h != "" {
 			args = append(args, "-headers", h)
 		}

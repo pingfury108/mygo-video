@@ -3,10 +3,13 @@
 package ffbin
 
 import (
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // Name is the file a program has on this platform.
@@ -55,4 +58,34 @@ var extraDirs = func() []string {
 func isFile(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && !st.IsDir()
+}
+
+// NoProxyArgs keeps an ffmpeg input on the local network from going through
+// a proxy in the environment. ffmpeg reads http_proxy for every HTTP input,
+// and a proxy meant for the internet turns a WebDAV server beside the
+// computer into an unreachable host.
+func NoProxyArgs(raw string) []string {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil
+	}
+	if !localHost(u.Hostname()) {
+		return nil
+	}
+	return []string{"-http_proxy", ""}
+}
+
+func localHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") ||
+		strings.HasSuffix(strings.ToLower(host), ".local") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+	}
+	// A name without a dot is resolved on the local network.
+	return !strings.Contains(host, ".")
 }
