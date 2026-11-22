@@ -483,6 +483,11 @@ func (p *Proxy) startHLS(s *Stream) (*hlsJob, error) {
 	if s.Audio != "" {
 		addInput(s.Audio)
 		args = append(args, "-map", "0:v:0", "-map", "1:a:0")
+	} else {
+		// HLS takes one picture and one sound. Without this, an MKV's
+		// subtitle, font and data tracks go to the muxer too, which turns
+		// the whole remux down.
+		args = append(args, "-map", "0:v:0?", "-map", "0:a:0?")
 	}
 	hlsTime := "4"
 	if live || transcode {

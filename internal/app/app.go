@@ -93,8 +93,9 @@ type app struct {
 	// retry is the stream to open again through ffmpeg when the player
 	// turns the first one down, and retryStage how far that went for an item:
 	// 0 untried, 1 remuxed, 2 transcoded.
-	retryStream streamproxy.Stream
-	retryStage  map[string]int
+	retryStream  streamproxy.Stream
+	retryStage   map[string]int
+	retryPending string
 	// hevcExt is whether Microsoft's HEVC decoder is installed, checked once.
 	hevcExt        bool
 	hevcExtChecked bool
@@ -793,6 +794,8 @@ func (a *app) play(it media.Item, fromStart bool) {
 	a.playSeq++
 	// A play chosen again is tried the whole way in again, the GPU first.
 	delete(a.webdavGPUFailed, it.ID)
+	delete(a.retryStage, it.ID)
+	a.retryPending = ""
 	switch {
 	case it.Source == "webdav":
 		a.playWebDAV(it, fromStart)
@@ -802,6 +805,12 @@ func (a *app) play(it media.Item, fromStart bool) {
 		return
 	}
 	a.closePlayer()
+	// AVFoundation turns down the containers ffmpeg writes, such as MKV.
+	// They go through ffmpeg before the player sees one, rather than
+	// waiting for it to fail.
+	if needsFFmpegBeforeOpen(it.Path) && a.playRemuxed(it, fromStart) {
+		return
+	}
 	p, err := video.Open(it.Path)
 	if err != nil {
 		// Media Foundation, on Windows, turns down some containers and
@@ -899,11 +908,14 @@ func (a *app) playRemuxed(it media.Item, fromStart bool) bool {
 	if kind == "transcode" {
 		encoder = a.pickVideoEncoder()
 	}
+	tagHEVC := runtime.GOOS == "darwin" &&
+		a.hevcSource(streamproxy.Stream{URL: it.Path})
 	url, token, err := a.proxy.Open(streamproxy.Stream{
 		URL:          it.Path,
 		Type:         kind,
 		VideoEncoder: encoder,
 		FFmpeg:       a.ffmpeg,
+		TagHEVC:      tagHEVC,
 	})
 	if err != nil {
 		return false
@@ -1037,26 +1049,71 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 }
 
 // canRetry says the player refused what it got, and ffmpeg can still try a
-// remux, then a transcode.
+// remux, then a transcode. It only reads the state: the view calls it every
+// frame, and changing the state there started several retries at once.
 func (a *app) canRetry() bool {
 	if a.ffmpeg == "" || a.player == nil || a.playing.ID == "" {
 		return false
 	}
-	if a.retryStream.URL == "" || a.retryStage[a.playing.ID] >= 2 {
+	if a.route != pagePlayer || a.retryStream.URL == "" ||
+		a.retryPending == a.playing.ID || a.retryStage[a.playing.ID] >= 2 {
 		return false
 	}
-	a.retryStage[a.playing.ID]++
 	return true
+}
+
+// scheduleRetry starts the next way in once, for the video still playing.
+// The stage moves when the retry is really chosen, not while the view reads
+// the error every frame.
+func (a *app) scheduleRetry() {
+	if !a.canRetry() {
+		return
+	}
+	id, seq := a.playing.ID, a.playSeq
+	a.retryStage[id]++
+	a.retryPending = id
+	time.AfterFunc(80*time.Millisecond, func() {
+		mygo.RunOnMain(func() {
+			if a.retryPending != id {
+				return
+			}
+			a.retryPending = ""
+			if a.playSeq != seq || a.playing.ID != id ||
+				a.route != pagePlayer || a.player == nil {
+				return
+			}
+			a.retryPlayback()
+		})
+	})
+}
+
+// reconnectPlayback retries a video that played and then broke off, from
+// the place it stood. The first way in is the one that worked before any
+// retry: the stream may have recovered while it was open.
+func (a *app) reconnectPlayback() {
+	if a.player == nil || a.playing.ID == "" || a.route != pagePlayer {
+		return
+	}
+	id := a.playing.ID
+	a.retryPending = ""
+	if a.retryStage[id] < 1 {
+		a.retryStage[id] = 1
+	}
+	a.retryPlayback()
 }
 
 // retryPlayback plays the stream again through ffmpeg: remuxed first, then
 // transcoded to H.264, for a file the system's player has no decoder for.
 func (a *app) retryPlayback() {
+	if a.route != pagePlayer || a.player == nil || a.playing.ID == "" {
+		return
+	}
 	s := a.retryStream
+	resume := a.playhead()
 	// The GPU decoder failed on this file: mpv is the next way in, and
 	// the one known to keep a 4K picture with its sound, when this build
 	// ships it. It takes the file in a window of its own.
-	if a.avTune != nil && a.playMPV(a.playing, a.playhead()) {
+	if a.avTune != nil && a.playMPV(a.playing, resume) {
 		if a.playing.Source == "webdav" {
 			// A drag while this plays asks for the place in the file; the
 			// GPU is not tried again on every one of them.
@@ -1069,11 +1126,14 @@ func (a *app) retryPlayback() {
 		return
 	}
 	webdav := a.playing.Source == "webdav"
-	if webdav && a.avTune != nil {
+	if webdav {
 		a.webdavGPUFailed[a.playing.ID] = true
-		// A remux starts where the film stands now, not where the playback
-		// that failed began.
-		s.Start = a.playhead()
+		if a.playReady {
+			// A video that played and broke off goes on where it stood.
+			// One that never showed a picture keeps the place it was
+			// asked for, which a resume from history may already be.
+			s.Start = resume
+		}
 	}
 	if a.retryStage[a.playing.ID] >= 2 {
 		s.Type = "transcode"
@@ -1081,8 +1141,19 @@ func (a *app) retryPlayback() {
 	} else {
 		s.Type = "remux"
 	}
+	if runtime.GOOS == "darwin" && s.Type == "remux" &&
+		a.hevcSource(streamproxy.Stream{URL: s.URL, Headers: s.Headers}) {
+		// AVFoundation reads HEVC only from the hvcC box an fMP4 remux
+		// writes, not from the hev1 tag the source may carry.
+		s.TagHEVC = true
+	}
 	s.FFmpeg = a.ffmpeg
 	it := a.playing
+	ready := a.playReady
+	fromStart := a.fresh
+	if ready {
+		fromStart = false
+	}
 	url, token, err := a.proxy.Open(s)
 	if err != nil {
 		a.say("换一种方式也打不开：%v", err)
@@ -1105,7 +1176,15 @@ func (a *app) retryPlayback() {
 		a.beginPlayback(it, player, true)
 		a.probeWebDAVDuration(it)
 	} else {
-		a.beginPlayback(it, player, false)
+		a.beginPlayback(it, player, fromStart)
+		if ready {
+			// The player's clock starts at zero for the remux: put it
+			// back where the interrupted playback stood.
+			player.Seek(resume)
+			a.seek = resume.Seconds()
+			a.seekHold = true
+			a.seekedAt = time.Now()
+		}
 	}
 	a.diag("retried with %s: %s", s.Type, s.URL)
 }
@@ -1175,6 +1254,7 @@ func (a *app) leavePlayer() {
 }
 
 func (a *app) closePlayer() {
+	a.retryPending = ""
 	if a.proxyToken != "" && a.proxy != nil {
 		a.proxy.Forget(a.proxyToken)
 		a.proxyToken = ""
@@ -1399,13 +1479,47 @@ func (a *app) diag(format string, args ...any) {
 	fmt.Fprintf(f, "%s %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
 }
 
-// hevcSource says the video's picture is HEVC in the hev1 tag.
-func (a *app) hevcSource(url string) bool {
-	if a.ffmpeg == "" || url == "" {
+// hevcSource says the video's picture is HEVC in the hev1 tag. The probe
+// carries the stream's headers, for a WebDAV server that asks for them,
+// and its answer is kept for the retries and the next play.
+func (a *app) hevcSource(s streamproxy.Stream) bool {
+	if a.ffmpeg == "" || s.URL == "" {
 		return false
 	}
-	cmd := exec.Command(a.ffmpeg, "-hide_banner", "-i", url)
+	key := "src\x00" + s.URL + "\x00" + headerArg(s.Headers)
+	if hevc, ok := a.hevcProbe[key]; ok {
+		return hevc
+	}
+	args := []string{"-hide_banner", "-rw_timeout", "8000000"}
+	if h := headerArg(s.Headers); h != "" {
+		args = append(args, "-headers", h)
+	}
+	args = append(args, "-i", s.URL)
+	cmd := exec.Command(a.ffmpeg, args...)
 	executil.Hide(cmd)
 	out, _ := cmd.CombinedOutput()
-	return strings.Contains(string(out), "Video: hevc")
+	hevc := strings.Contains(string(out), "Video: hevc")
+	if len(a.hevcProbe) > 512 {
+		a.hevcProbe = map[string]bool{}
+	}
+	a.hevcProbe[key] = hevc
+	return hevc
+}
+
+// needsFFmpegBeforeOpen says the system's player has no demuxer for the
+// file, so ffmpeg has to hand it over as HLS. AVFoundation reads MP4, MOV
+// and HLS itself; MKV, AVI, WebM and the rest are left to ffmpeg.
+func needsFFmpegBeforeOpen(path string) bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mkv", ".avi", ".webm", ".flv", ".wmv", ".rm", ".rmvb",
+		".ts", ".m2ts", ".mts", ".vob", ".ogv":
+		return true
+	}
+	return false
 }

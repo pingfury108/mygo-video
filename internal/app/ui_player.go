@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"mygo-video/internal/media"
@@ -99,20 +99,36 @@ func (a *app) playerPage(c *ui.Context) {
 				a.errLogged = a.playing.ID
 				a.diag("player error item=%s err=%v", a.playing.ID, err)
 			}
-			if a.canRetry() {
+			switch {
+			case a.playReady:
+				// A video that already showed a picture broke off. Do not
+				// remux it as if it never opened: keep the timeline and
+				// offer to go on from the place it stood.
+				if a.retryPending == a.playing.ID {
+					a.playerMessage(c, "正在从当前位置重试…", "", false, nil)
+				} else {
+					a.playerMessage(c, "播放中断",
+						"网络或文件读取断开了，可以从当前进度重试。", true,
+						a.reconnectPlayback)
+				}
+			case a.retryPending == a.playing.ID:
 				msg := "正在换一种方式打开…"
 				if a.retryStage[a.playing.ID] >= 2 {
 					msg = "正在转码，可能较慢…"
 				}
-				time.AfterFunc(80*time.Millisecond, func() {
-					mygo.RunOnMain(a.retryPlayback)
-				})
-				a.playerMessage(c, msg, "", false)
-			} else {
-				a.playerMessage(c, "打不开这个视频", err.Error(), true)
+				a.playerMessage(c, msg, "", false, nil)
+			case a.canRetry():
+				a.scheduleRetry()
+				msg := "正在换一种方式打开…"
+				if a.retryStage[a.playing.ID] >= 2 {
+					msg = "正在转码，可能较慢…"
+				}
+				a.playerMessage(c, msg, "", false, nil)
+			default:
+				a.playerMessage(c, "打不开这个视频", playbackErrorText(err), true, nil)
 			}
 		} else if !pl.Ready() {
-			a.playerMessage(c, "正在打开…", "", false)
+			a.playerMessage(c, "正在打开…", "", false, nil)
 			c.After(120 * time.Millisecond)
 		}
 	})
@@ -514,7 +530,7 @@ func (a *app) drawerEpisode(c *ui.Context, ep media.Item) {
 	})
 }
 
-func (a *app) playerMessage(c *ui.Context, title, detail string, failure bool) {
+func (a *app) playerMessage(c *ui.Context, title, detail string, failure bool, retry func()) {
 	ui.Box(c).Absolute().Left(0).Right(0).Top(0).Bottom(0).Center().Children(func() {
 		ui.Column(c).Gap(12).AlignItems(ui.Center).Children(func() {
 			if !failure {
@@ -525,11 +541,23 @@ func (a *app) playerMessage(c *ui.Context, title, detail string, failure bool) {
 				ui.Text(c, detail).FontSize(12).TextColor(ui.RGBA(255, 255, 255, 0.6)).
 					MaxWidth(520).TextAlign(ui.Center)
 			}
+			if retry != nil {
+				ghostButton(c, "从当前进度重试", iconRefresh, retry)
+			}
 			if failure {
 				ghostButton(c, "返回", iconBack, a.leavePlayer)
 			}
 		})
 	})
+}
+
+// playbackErrorText keeps the system's word for the failure out of the
+// headline, where it means nothing to the listener.
+func playbackErrorText(err error) string {
+	if strings.Contains(err.Error(), "Cannot Open") {
+		return "系统播放器无法打开或解码这个文件（Cannot Open）"
+	}
+	return err.Error()
 }
 
 func (a *app) togglePlay() {

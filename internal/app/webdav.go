@@ -211,10 +211,14 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	if strings.HasSuffix(strings.ToLower(it.RemoteID), ".m3u8") {
 		kind = "hls"
 	}
+	if kind == "mp4" && needsFFmpegBeforeOpen(it.RemoteID) {
+		kind = "remux"
+	}
 	// AVFoundation plays this picture only with the hvcC box the hev1 tag
 	// leaves out, which an fMP4 remux writes.
 	tagHEVC := false
-	if runtime.GOOS == "darwin" && kind == "mp4" && a.hevcSource(it.RemoteID) {
+	if runtime.GOOS == "darwin" && (kind == "mp4" || kind == "remux") &&
+		a.hevcSource(streamproxy.Stream{URL: it.RemoteID, Headers: a.webdavAuth()}) {
 		kind = "remux"
 		tagHEVC = true
 	}
@@ -230,13 +234,26 @@ func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 		a.say("%v", err)
 		return
 	}
+	// Only the remux really starts at d in ffmpeg. A file AVFoundation
+	// opens itself starts at zero, and is seeked after opening; counting
+	// its playhead from d would put it at the wrong time and trigger the
+	// next episode far too early.
 	a.webdavHLS = strings.Contains(url, "/hls/")
-	a.webdavBase = d
+	a.webdavBase = 0
+	if a.webdavHLS {
+		a.webdavBase = d
+	}
 	a.proxyToken = token
 	a.subs = nil
 	a.subsOn = false
 	a.retryStream = streamproxy.Stream{URL: it.RemoteID, Headers: a.webdavAuth(), Start: d}
 	a.beginPlayback(it, player, true)
+	if !a.webdavHLS && d > 0 {
+		player.Seek(d)
+		a.seek = d.Seconds()
+		a.seekHold = true
+		a.seekedAt = time.Now()
+	}
 	a.probeWebDAVDuration(it)
 }
 
