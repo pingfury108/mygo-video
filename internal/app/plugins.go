@@ -101,8 +101,11 @@ func (a *app) reshowSource(id string) {
 	a.pluginSearch = nil
 	a.pluginErr = ""
 	a.pluginBusy = false
+	a.pluginGen++
 	a.pluginTab = ""
 	a.searchQuery = ""
+	a.searchBusy = false
+	a.searchGen++
 	a.sourceMenu = false
 	a.invalidate()
 }
@@ -114,6 +117,7 @@ func (a *app) setPluginEnabled(pe *pluginEntry, on bool) {
 	}
 	id := pe.man.ID
 	if !on {
+		a.forgetPluginAccount(id)
 		if pe.p != nil {
 			pe.p.Close()
 			pe.p = nil
@@ -127,6 +131,9 @@ func (a *app) setPluginEnabled(pe *pluginEntry, on bool) {
 		a.pluginSearch = nil
 		a.pluginErr = ""
 		a.pluginBusy = false
+		a.pluginGen++
+		a.searchBusy = false
+		a.searchGen++
 		a.sourceMenu = false
 		a.invalidate()
 		return
@@ -181,6 +188,7 @@ func (a *app) uninstallPlugin(pe *pluginEntry) {
 		pe.p.Close()
 		pe.p = nil
 	}
+	a.forgetPluginAccount(id)
 	if err := os.RemoveAll(pe.dir); err != nil {
 		a.say("删不掉 %s：%v", pe.man.Name, err)
 		return
@@ -262,6 +270,10 @@ func (a *app) installZipFile() {
 			Filters:     []mygo.FileFilter{{Name: "Zip", Extensions: []string{"zip"}}},
 		})
 		if err != nil || len(paths) == 0 {
+			return
+		}
+		if info, err := os.Stat(paths[0]); err == nil && info.Size() > pluginSizeLimit {
+			mygo.RunOnMain(func() { a.say("这个 zip 太大了") })
 			return
 		}
 		data, err := os.ReadFile(paths[0])
@@ -378,6 +390,7 @@ func (a *app) installDir(src, origin string) (string, error) {
 		return "", fmt.Errorf("已经装了 %s", name)
 	}
 	if err := copyDir(src, dst); err != nil {
+		os.RemoveAll(dst)
 		return "", err
 	}
 	a.store.SetPluginInstalled(id, origin)
@@ -408,9 +421,16 @@ func (a *app) reloadPlugins() {
 	a.installErr = ""
 }
 
+const (
+	pluginSizeLimit = 100 << 20
+	pluginFileLimit = 2000
+)
+
 // copyDir copies a plugin's folder, leaving out its git history and
 // anything that isn't a file or a folder.
 func copyDir(src, dst string) error {
+	var files int
+	var total int64
 	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -429,18 +449,39 @@ func copyDir(src, dst string) error {
 		if !d.Type().IsRegular() {
 			return nil
 		}
+		files++
+		if files > pluginFileLimit {
+			return errors.New("插件里的文件太多了")
+		}
 		in, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		defer in.Close()
+		info, err := in.Stat()
+		if err != nil {
+			in.Close()
+			return err
+		}
+		if total+info.Size() > pluginSizeLimit {
+			in.Close()
+			return errors.New("插件太大了")
+		}
 		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			in.Close()
+			return err
+		}
+		n, err := io.Copy(out, io.LimitReader(in, info.Size()+1))
+		out.Close()
+		in.Close()
 		if err != nil {
 			return err
 		}
-		defer out.Close()
-		_, err = io.Copy(out, in)
-		return err
+		if n != info.Size() {
+			return fmt.Errorf("复制 %s 时文件变了", d.Name())
+		}
+		total += n
+		return nil
 	})
 }
 
@@ -451,7 +492,7 @@ func unzip(data []byte, dst string) error {
 	if err != nil {
 		return err
 	}
-	if len(zr.File) > 2000 {
+	if len(zr.File) > pluginFileLimit {
 		return errors.New("zip 里的文件太多了")
 	}
 	var total int64
@@ -466,8 +507,11 @@ func unzip(data []byte, dst string) error {
 			}
 			continue
 		}
-		total += int64(f.UncompressedSize64)
-		if total > 100<<20 {
+		if !f.Mode().IsRegular() {
+			return fmt.Errorf("zip 里有不支持的文件：%s", f.Name)
+		}
+		remaining := int64(pluginSizeLimit) - total
+		if remaining <= 0 {
 			return errors.New("zip 解压后太大了")
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -482,12 +526,19 @@ func unzip(data []byte, dst string) error {
 			rc.Close()
 			return err
 		}
-		_, err = io.Copy(out, io.LimitReader(rc, int64(f.UncompressedSize64)+1))
+		n, err := io.Copy(out, io.LimitReader(rc, remaining+1))
 		out.Close()
 		rc.Close()
 		if err != nil {
 			return err
 		}
+		if n > remaining {
+			return errors.New("zip 解压后太大了")
+		}
+		if uint64(n) != f.UncompressedSize64 {
+			return fmt.Errorf("zip 里的文件大小不对：%s", f.Name)
+		}
+		total += n
 	}
 	return nil
 }
@@ -665,6 +716,9 @@ func (a *app) accountFor(p *plugin.Plugin) *plugin.Account {
 		acc, err := p.Account()
 		mygo.RunOnMain(func() {
 			delete(a.pluginAccountBusy, id)
+			if a.pluginByID(id) != p {
+				return
+			}
 			a.pluginChecked[id] = true
 			if err == nil {
 				a.pluginAccounts[id] = acc
@@ -685,6 +739,9 @@ func (a *app) signInPlugin(p *plugin.Plugin) {
 		acc, err := p.SignIn()
 		mygo.RunOnMain(func() {
 			delete(a.pluginAccountBusy, id)
+			if a.pluginByID(id) != p {
+				return
+			}
 			a.pluginChecked[id] = true
 			if err != nil {
 				a.say("%v", err)
@@ -701,11 +758,24 @@ func (a *app) signOutPlugin(p *plugin.Plugin) {
 	go func() {
 		_ = p.SignOut()
 		mygo.RunOnMain(func() {
+			if a.pluginByID(id) != p {
+				a.forgetPluginAccount(id)
+				a.invalidate()
+				return
+			}
 			delete(a.pluginAccounts, id)
 			a.pluginChecked[id] = true
 			a.invalidate()
 		})
 	}()
+}
+
+// forgetPluginAccount drops what the settings page knows of a plugin's
+// account, so that a new instance is asked again.
+func (a *app) forgetPluginAccount(id string) {
+	delete(a.pluginAccounts, id)
+	delete(a.pluginAccountBusy, id)
+	delete(a.pluginChecked, id)
 }
 
 // pluginEntryByID is the plugin with that id, on or off.

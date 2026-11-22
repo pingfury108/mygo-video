@@ -142,7 +142,8 @@ plugins/<id>/
 | `apiVersion` | 目前是 `1` |
 | `main` | 入口文件，相对路径 |
 | `playback` | `stream`（直接播）或 `catalog`（目录，正片在官方页播） |
-| `permissions.network` | `fetch` 和播放代理能访问的 host，支持 `*.example.com` 和 `*` |
+| `permissions.network` | `fetch`、WebSocket 和 `host.openURL` 能访问的 host，支持 `*.example.com` 和 `*` |
+| `permissions.streamHosts` | 允许交给播放器的直链 host；不填时沿用 `network`。需要 CDN 与 API 不同域时再单独声明 |
 | `settings` | 设置项，插件页自动生成输入框 |
 | `login` | 登录页地址，以及登录后要保存哪些域的 Cookie |
 
@@ -209,10 +210,10 @@ plugins/<id>/
 | `host.storage.get/set/remove(key)` | 插件自己的持久化，JSON |
 | `host.cookie()` | app 为这个插件保存的 Cookie 头 |
 | `host.emitDanmaku({text, color})` | 把一条直播弹幕交给播放器 |
-| `host.wsOpen(url, headers)` / `host.wsOn` / `host.wsSend` / `host.wsClose` | WebSocket（受网络权限限制） |
+| `host.ws.open(url, headers)` / `host.ws.on` / `host.ws.send` / `host.ws.close` | WebSocket（受网络权限限制） |
 | `host.inflate(bytes)` | zlib 解压 |
 | `host.crypto.md5(text)` | MD5（B 站 wbi 签名用） |
-| `host.openURL(url)` | 用系统浏览器打开 |
+| `host.openURL(url)` | 用系统浏览器打开（受网络权限限制） |
 | `host.platform` / `host.arch` / `host.dir` / `host.dataDir` | 运行环境 |
 | `host.ffmpeg` | 是否有 ffmpeg，用来决定要不要请求 DASH |
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -110,6 +111,8 @@ type app struct {
 	// playSeq numbers the play requests a plugin answers apart: one that
 	// took its time must not open over the video chosen after it.
 	playSeq int
+	// detailGen numbers the detail pages a plugin answers apart.
+	detailGen int
 	// errLogged is the item whose player error is already in the log.
 	errLogged string
 
@@ -150,8 +153,10 @@ type app struct {
 	pluginErr    string
 	pluginBusy   bool
 	pluginTab    string
+	pluginGen    int
 	searchQuery  string
 	searchBusy   bool
+	searchGen    int
 
 	// The plugins page: which plugin is open, and how the list is filtered.
 	pluginOpen   string
@@ -556,6 +561,7 @@ func (a *app) openDetail(it media.Item) {
 	a.forward = nil
 	a.current = it
 	a.detailEpisodes = nil
+	a.detailGen++
 	a.route = pageDetail
 	a.detailScroll = ui.ScrollState{}
 	if it.Source != "" && it.Source != "webdav" && it.Source != "iptv" {
@@ -571,10 +577,11 @@ func (a *app) loadDetail(it media.Item) {
 		return
 	}
 	cur := it.ID
+	gen := a.detailGen
 	go func() {
 		t, err := p.Title(it.RemoteID)
 		mygo.RunOnMain(func() {
-			if a.current.ID != cur || err != nil || t == nil {
+			if a.detailGen != gen || a.current.ID != cur || err != nil || t == nil {
 				return
 			}
 			if t.Video.Name != "" {
@@ -660,7 +667,11 @@ func (a *app) switchSource(i int) {
 	a.pluginSearch = nil
 	a.pluginErr = ""
 	a.pluginTab = ""
+	a.pluginBusy = false
+	a.pluginGen++
 	a.searchQuery = ""
+	a.searchBusy = false
+	a.searchGen++
 	if i == sourceWebDAV {
 		a.webdavPath = ""
 		a.webdavLoaded = ""
@@ -687,16 +698,21 @@ func (a *app) loadPluginHome() {
 // loadPluginTab asks the plugin for the tab showing: its home, or the
 // library it keeps.
 func (a *app) loadPluginTab() {
-	if a.source < sourcePluginBase || a.pluginBusy || a.pluginBrowse != nil {
+	if a.source < sourcePluginBase || a.pluginBusy || a.pluginBrowse != nil || a.pluginErr != "" {
 		return
 	}
-	pe := a.plugins[a.source-sourcePluginBase]
+	i := a.source - sourcePluginBase
+	if i >= len(a.plugins) {
+		return
+	}
+	pe := a.plugins[i]
 	p := pe.p
 	if p == nil {
 		return
 	}
 	id := pe.man.ID
 	tab := a.pluginTab
+	gen := a.pluginGen
 	a.pluginBusy = true
 	go func() {
 		var b *media.Browse
@@ -716,8 +732,12 @@ func (a *app) loadPluginTab() {
 			b, err = p.Home()
 		}
 		mygo.RunOnMain(func() {
+			if a.pluginGen != gen {
+				return
+			}
 			a.pluginBusy = false
-			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].man.ID != id || a.pluginTab != tab {
+			i := a.source - sourcePluginBase
+			if i < 0 || i >= len(a.plugins) || a.plugins[i].man.ID != id || a.pluginTab != tab {
 				return
 			}
 			if err != nil {
@@ -748,6 +768,7 @@ func (a *app) setPluginTab(tab string) {
 	a.pluginItems = nil
 	a.pluginErr = ""
 	a.pluginBusy = false
+	a.pluginGen++
 	a.loadPluginTab()
 	a.invalidate()
 }
@@ -983,6 +1004,20 @@ func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromSta
 		return
 	}
 	if pb.Open != "" {
+		u, err := url.Parse(pb.Open)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+			a.say("这个来源给了一个打不开的地址")
+			return
+		}
+		p := a.pluginByID(it.Source)
+		if p == nil {
+			a.say("这个来源已经不在了")
+			return
+		}
+		if !p.AllowsStreamHost(pb.Open) && !p.AllowsHost(pb.Open) {
+			a.say("这个来源没有打开该地址的权限")
+			return
+		}
 		if err := mygo.Shell.OpenExternal(pb.Open); err != nil {
 			a.say("%v", err)
 			return

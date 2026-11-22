@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 
@@ -17,16 +18,26 @@ import (
 // wsConn is one WebSocket a plugin opened, and what to call when it says
 // something.
 type wsConn struct {
-	ctx    context.Context
-	stop   context.CancelFunc
-	c      *websocket.Conn
-	mu     sync.Mutex
-	events map[string]moejs.Value
+	ctx       context.Context
+	stop      context.CancelFunc
+	c         *websocket.Conn
+	mu        sync.Mutex
+	events    map[string]moejs.Value
+	pending   [][]byte
+	closed    bool
+	closeOnce sync.Once
 }
 
 // wsOpen opens a WebSocket and returns its id at once; open, message and
 // close come later as events.
-func (p *Plugin) wsOpen(v *vm, url string, headers map[string]string) string {
+func (p *Plugin) wsOpen(v *vm, address string, headers map[string]string) (string, error) {
+	u, err := url.Parse(address)
+	if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") {
+		return "", fmt.Errorf("not a websocket address: %s", address)
+	}
+	if !p.AllowsHost(address) {
+		return "", fmt.Errorf("the plugin may not reach %s", u.Hostname())
+	}
 	id := fmt.Sprintf("ws%d", atomic.AddInt32(&p.wsSeq, 1))
 	ctx, stop := context.WithCancel(context.Background())
 	conn := &wsConn{ctx: ctx, stop: stop, events: map[string]moejs.Value{}}
@@ -44,15 +55,30 @@ func (p *Plugin) wsOpen(v *vm, url string, headers map[string]string) string {
 				opts.HTTPHeader.Set(k, val)
 			}
 		}
-		c, _, err := websocket.Dial(ctx, url, opts)
+		c, _, err := websocket.Dial(ctx, address, opts)
 		if err != nil {
-			p.wsFire(v, conn, "close", nil)
+			conn.mu.Lock()
+			conn.closed = true
+			conn.mu.Unlock()
+			p.wsFireClose(v, conn)
 			p.wsDrop(id)
 			return
 		}
 		conn.mu.Lock()
+		if conn.closed {
+			conn.mu.Unlock()
+			c.Close(websocket.StatusNormalClosure, "")
+			return
+		}
 		conn.c = c
+		pending := conn.pending
+		conn.pending = nil
 		conn.mu.Unlock()
+		for _, data := range pending {
+			if err := c.Write(ctx, websocket.MessageBinary, data); err != nil {
+				break
+			}
+		}
 		p.wsFire(v, conn, "open", nil)
 		for {
 			_, data, err := c.Read(ctx)
@@ -61,11 +87,18 @@ func (p *Plugin) wsOpen(v *vm, url string, headers map[string]string) string {
 			}
 			p.wsFire(v, conn, "message", data)
 		}
+		conn.mu.Lock()
+		conn.closed = true
+		conn.mu.Unlock()
 		c.Close(websocket.StatusNormalClosure, "")
-		p.wsFire(v, conn, "close", nil)
+		p.wsFireClose(v, conn)
 		p.wsDrop(id)
 	}()
-	return id
+	return id, nil
+}
+
+func (p *Plugin) wsFireClose(v *vm, conn *wsConn) {
+	conn.closeOnce.Do(func() { p.wsFire(v, conn, "close", nil) })
 }
 
 // wsFire calls the plugin's handler of an event on the loop that runs it.
@@ -107,11 +140,21 @@ func (p *Plugin) wsSend(id string, data []byte) error {
 		return fmt.Errorf("no websocket %s", id)
 	}
 	conn.mu.Lock()
+	if conn.closed {
+		conn.mu.Unlock()
+		return fmt.Errorf("websocket %s is closed", id)
+	}
+	if conn.c == nil {
+		if len(conn.pending) >= 64 {
+			conn.mu.Unlock()
+			return fmt.Errorf("websocket %s has too many messages waiting", id)
+		}
+		conn.pending = append(conn.pending, append([]byte(nil), data...))
+		conn.mu.Unlock()
+		return nil
+	}
 	c := conn.c
 	conn.mu.Unlock()
-	if c == nil {
-		return fmt.Errorf("websocket %s is still opening", id)
-	}
 	return c.Write(conn.ctx, websocket.MessageBinary, data)
 }
 
@@ -122,12 +165,18 @@ func (p *Plugin) wsClose(id string) {
 	if conn == nil {
 		return
 	}
-	conn.stop()
 	conn.mu.Lock()
-	if conn.c != nil {
-		conn.c.Close(websocket.StatusNormalClosure, "")
+	if conn.closed {
+		conn.mu.Unlock()
+		return
 	}
+	conn.closed = true
+	conn.stop()
+	c := conn.c
 	conn.mu.Unlock()
+	if c != nil {
+		c.Close(websocket.StatusNormalClosure, "")
+	}
 	p.wsDrop(id)
 }
 
@@ -149,6 +198,7 @@ func (p *Plugin) closeWS() {
 	for _, c := range conns {
 		c.stop()
 		c.mu.Lock()
+		c.closed = true
 		if c.c != nil {
 			c.c.Close(websocket.StatusGoingAway, "")
 		}

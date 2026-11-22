@@ -114,8 +114,7 @@ func (a *app) finishSignIn() {
 	}
 	id := pe.man.ID
 	a.closeSignIn()
-	delete(a.pluginChecked, id)
-	delete(a.pluginAccounts, id)
+	a.forgetPluginAccount(id)
 	a.route = pagePlugins
 	a.say("已登录 %s", pe.man.Name)
 	a.invalidate()
@@ -147,8 +146,7 @@ func (a *app) signOutEntry(pe *pluginEntry) {
 			}
 		}
 	}
-	delete(a.pluginChecked, pe.man.ID)
-	delete(a.pluginAccounts, pe.man.ID)
+	a.forgetPluginAccount(pe.man.ID)
 	a.invalidate()
 }
 

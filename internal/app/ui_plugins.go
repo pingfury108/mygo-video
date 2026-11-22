@@ -224,6 +224,7 @@ func (a *app) pluginDetail(c *ui.Context, pe *pluginEntry) {
 				smallButton(c, "重新加载", func() {
 					pe.p.Close()
 					pe.p = nil
+					a.forgetPluginAccount(pe.man.ID)
 					a.setPluginEnabled(pe, true)
 				}, false)
 			}

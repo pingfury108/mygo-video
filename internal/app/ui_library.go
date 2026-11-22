@@ -136,13 +136,21 @@ func (a *app) searchPlugin() {
 		return
 	}
 	id := pe.man.ID
+	gen := a.searchGen
 	a.searchQuery = q
 	a.searchBusy = true
 	go func() {
 		r, err := p.Search(q, 0)
 		mygo.RunOnMain(func() {
+			if a.searchGen != gen {
+				return
+			}
 			a.searchBusy = false
-			if a.source < sourcePluginBase || a.plugins[a.source-sourcePluginBase].man.ID != id {
+			i := a.source - sourcePluginBase
+			if i < 0 || i >= len(a.plugins) || a.plugins[i].man.ID != id {
+				return
+			}
+			if strings.TrimSpace(a.query) != q {
 				return
 			}
 			a.pluginSearch = nil

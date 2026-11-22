@@ -178,6 +178,9 @@ func readManifest(dir string) (Manifest, error) {
 	if m.ID == "" {
 		return Manifest{}, fmt.Errorf("%s: plugin.json needs an id", dir)
 	}
+	if len(m.ID) > 64 || !pluginName.MatchString(m.ID) {
+		return Manifest{}, fmt.Errorf("%s: the id may only use letters, digits, ., _ and -, and starts with a letter or digit: %q", dir, m.ID)
+	}
 	if m.APIVersion == 0 {
 		m.APIVersion = APIVersion
 	}
@@ -195,6 +198,19 @@ func readManifest(dir string) (Manifest, error) {
 	}
 	if !filepath.IsLocal(m.Main) {
 		return Manifest{}, fmt.Errorf("%s: main must be a file in the plugin's folder: %q", dir, m.Main)
+	}
+	if m.Login != nil && m.Login.URL != "" {
+		u, err := url.Parse(m.Login.URL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+			return Manifest{}, fmt.Errorf("%s: login.url must be an http or https address", dir)
+		}
+	}
+	if m.MinAppVersion != "" && appVersion != "" {
+		if min, ok := parseVersion(m.MinAppVersion); ok {
+			if now, ok := parseVersion(appVersion); ok && versionLess(now, min) {
+				return Manifest{}, fmt.Errorf("%s: needs app %s or newer", dir, m.MinAppVersion)
+			}
+		}
 	}
 	return m, nil
 }
@@ -275,12 +291,17 @@ type vm struct {
 	api    *webapi.API
 	helper moejs.Value
 
-	inFlight int
+	inFlight  int
+	closeOnce sync.Once
+	done      chan struct{}
 }
 
 func (v *vm) close() {
-	v.api.Close()
-	v.loop.Terminate()
+	v.closeOnce.Do(func() {
+		close(v.done)
+		v.api.Close()
+		v.loop.Terminate()
+	})
 }
 
 const helperBody = `
@@ -342,7 +363,7 @@ func (p *Plugin) start() (*vm, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &vm{rt: rt, loop: loop, api: api}
+	v := &vm{rt: rt, loop: loop, api: api, done: make(chan struct{})}
 	if err := p.installHost(v); err != nil {
 		api.Close()
 		return nil, err
@@ -428,6 +449,9 @@ func (p *Plugin) installHost(v *vm) error {
 			if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
 				return moejs.Undefined(), fmt.Errorf("not a web address: %s", address)
 			}
+			if !p.AllowsHost(address) && !p.AllowsStreamHost(address) {
+				return moejs.Undefined(), fmt.Errorf("the plugin may not open %s", u.Hostname())
+			}
 			return moejs.Undefined(), openURL(address)
 		}),
 		"ws": map[string]any{
@@ -437,7 +461,11 @@ func (p *Plugin) installHost(v *vm) error {
 				if len(args) > 1 {
 					headers = wsHeaders(v, args[1])
 				}
-				return moejs.String(p.wsOpen(v, url, headers)), nil
+				id, err := p.wsOpen(v, url, headers)
+				if err != nil {
+					return moejs.Undefined(), err
+				}
+				return moejs.String(id), nil
 			}),
 			"on": moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 				p.wsOn(moejs.Arg(args, 0).String(), moejs.Arg(args, 1).String(), moejs.Arg(args, 2))
@@ -519,12 +547,33 @@ func (p *Plugin) storageGet(v *vm) native {
 
 func (p *Plugin) storageSet(v *vm) native {
 	return func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		key := moejs.Arg(args, 0).String()
+		if key == "" || len(key) > 256 {
+			return moejs.Undefined(), fmt.Errorf("a storage key must be 1 to 256 bytes")
+		}
 		raw, err := v.rt.AppendJSON(nil, moejs.Arg(args, 1))
 		if err != nil {
 			return moejs.Undefined(), err
 		}
+		if len(raw) > storageLimit {
+			return moejs.Undefined(), fmt.Errorf("a storage value may be at most %d bytes", storageLimit)
+		}
 		p.mu.Lock()
-		p.storage[moejs.Arg(args, 0).String()] = raw
+		if _, exists := p.storage[key]; !exists && len(p.storage) >= storageKeysLimit {
+			p.mu.Unlock()
+			return moejs.Undefined(), fmt.Errorf("the plugin has too many storage keys")
+		}
+		total := 0
+		for k, old := range p.storage {
+			if k != key {
+				total += len(old)
+			}
+		}
+		if total+len(raw) > storageLimit {
+			p.mu.Unlock()
+			return moejs.Undefined(), fmt.Errorf("the plugin's storage is full")
+		}
+		p.storage[key] = raw
 		err = p.writeJSON("storage.json", p.storage)
 		p.mu.Unlock()
 		return moejs.Undefined(), err
@@ -639,6 +688,8 @@ func (p *Plugin) call(method string, params, out any) error {
 			return nil
 		}
 		return json.Unmarshal(a.json, out)
+	case <-v.done:
+		return fmt.Errorf("the plugin stopped; try again")
 	case <-timer.C:
 		p.dropIfStuck(v)
 		return fmt.Errorf("the plugin didn't answer %s in time", method)
@@ -709,8 +760,12 @@ func (p *Plugin) AllowsHost(raw string) bool {
 }
 
 // AllowsStreamHost reports whether the plugin may hand the app an address to
-// play: the streamHosts permission names its host, or *.
+// play: the streamHosts permission names its host, or *. A plugin that names
+// no stream hosts may play the hosts it may already fetch.
 func (p *Plugin) AllowsStreamHost(raw string) bool {
+	if len(p.manifest.Permissions.StreamHosts) == 0 {
+		return p.AllowsHost(raw)
+	}
 	return p.allowsHost(p.manifest.Permissions.StreamHosts, raw)
 }
 
@@ -780,4 +835,51 @@ func bytesRepeat(b byte, n int) []byte {
 	return out
 }
 
-var pluginName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+var pluginName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+const (
+	storageLimit     = 4 << 20
+	storageKeysLimit = 1000
+)
+
+// parseVersion reads the leading numbers of a dotted version, so "0.10.0 dev"
+// and "v0.10.0" both mean 0.10.0.
+func parseVersion(v string) ([]int, bool) {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if v == "" {
+		return nil, false
+	}
+	parts := strings.Split(v, ".")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, digits := 0, 0
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				break
+			}
+			n = n*10 + int(r-'0')
+			digits++
+		}
+		if digits == 0 {
+			break
+		}
+		out = append(out, n)
+	}
+	return out, len(out) > 0
+}
+
+func versionLess(a, b []int) bool {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		x, y := 0, 0
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return false
+}

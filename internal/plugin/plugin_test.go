@@ -270,3 +270,45 @@ export async function search() {
 		t.Fatalf("got %q, want denied", r.Videos[0].Name)
 	}
 }
+
+func TestManifestIDMustBeSafe(t *testing.T) {
+	dir := t.TempDir()
+	manifest := strings.Replace(demoManifest, `"demo"`, `"../outside"`, 1)
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readManifest(dir); err == nil {
+		t.Fatal("readManifest accepted an id that leaves the plugin folder")
+	}
+}
+
+func TestMinAppVersion(t *testing.T) {
+	old := appVersion
+	appVersion = "0.9.0"
+	defer func() { appVersion = old }()
+
+	dir := t.TempDir()
+	manifest := strings.Replace(demoManifest, `"apiVersion": 1,`, `"apiVersion": 1, "minAppVersion": "0.10.0",`, 1)
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readManifest(dir); err == nil {
+		t.Fatal("readManifest accepted a plugin that needs a newer app")
+	}
+
+	appVersion = "0.10.0 dev"
+	if _, err := readManifest(dir); err != nil {
+		t.Fatalf("readManifest rejected a plugin for this app: %v", err)
+	}
+}
+
+func TestStreamHostsFallBackToNetwork(t *testing.T) {
+	p := loadDemo(t)
+	defer p.Close()
+	if !p.AllowsStreamHost("http://127.0.0.1/video.mp4") {
+		t.Fatal("a plugin without streamHosts may not play a host it may fetch")
+	}
+	if p.AllowsStreamHost("https://evil.example/video.mp4") {
+		t.Fatal("a host outside the network permission was allowed")
+	}
+}
