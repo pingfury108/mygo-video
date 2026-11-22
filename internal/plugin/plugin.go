@@ -883,3 +883,21 @@ func versionLess(a, b []int) bool {
 	}
 	return false
 }
+
+// CompareVersion compares two dotted versions: -1 when a is older, 0 when
+// they match, and 1 when a is newer. A version it cannot read counts as a
+// match.
+func CompareVersion(a, b string) int {
+	av, aok := parseVersion(a)
+	bv, bok := parseVersion(b)
+	if !aok || !bok {
+		return 0
+	}
+	switch {
+	case versionLess(av, bv):
+		return -1
+	case versionLess(bv, av):
+		return 1
+	}
+	return 0
+}

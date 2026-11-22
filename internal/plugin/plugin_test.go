@@ -312,3 +312,22 @@ func TestStreamHostsFallBackToNetwork(t *testing.T) {
 		t.Fatal("a host outside the network permission was allowed")
 	}
 }
+
+func TestCompareVersion(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"0.1.0", "0.1.0", 0},
+		{"0.1.0", "0.1.1", -1},
+		{"0.2.0", "0.10.0", -1},
+		{"1.0.0", "0.99.0", 1},
+		{"v0.1.0", "0.1.0 dev", 0},
+		{"dev", "0.1.0", 0},
+	}
+	for _, c := range cases {
+		if got := CompareVersion(c.a, c.b); got != c.want {
+			t.Errorf("CompareVersion(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}

@@ -180,6 +180,34 @@ jobs:
           pattern: dist-*
           path: dist
           merge-multiple: true
+      - name: pack official plugins
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for manifest in examples/*/plugin.json; do
+            dir=$(dirname "$manifest")
+            id=$(jq -r '.id // empty' "$manifest")
+            case "$id" in
+              ""|*[!A-Za-z0-9._-]*)
+                echo "bad plugin id: $id" >&2
+                exit 1
+                ;;
+            esac
+            asset="plugin-$id.zip"
+            (cd "$dir" && zip -qr "$GITHUB_WORKSPACE/dist/$asset" .)
+            sha=$(sha256sum "dist/$asset" | awk '{print $1}')
+            jq --arg asset "$asset" --arg sha "$sha" \
+              '{id,name,version,apiVersion:(.apiVersion // 1),
+                minAppVersion:(.minAppVersion // ""),description:(.description // ""),
+                playback:(.playback // "stream"),permissions:(.permissions // {}),
+                login:(.login != null),asset:$asset,sha256:$sha}' \
+              "$manifest" > "dist/.manifest-$id.json"
+          done
+          jq -s '{schema: 1, plugins: map(select(.id != null))}' \
+            dist/.manifest-*.json > dist/plugins.json
+          rm dist/.manifest-*.json
+          cat dist/plugins.json
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}

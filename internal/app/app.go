@@ -145,6 +145,16 @@ type app struct {
 	installBusy   bool
 	installErr    string
 
+	// The official plugin market: its list, what is being installed, and
+	// how far the dialog is scrolled.
+	marketDialog     bool
+	marketLoading    bool
+	marketFetched    bool
+	marketErr        string
+	marketInstalling string
+	marketPlugins    []marketPlugin
+	marketScroll     ui.ScrollState
+
 	// What the source being shown has: its home page, the videos of it,
 	// the search last run, and the error that stopped them.
 	pluginBrowse *media.Browse

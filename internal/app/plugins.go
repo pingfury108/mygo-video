@@ -212,6 +212,9 @@ func (a *app) installMenuButton(c *ui.Context) {
 		panel.MinWidth(190).Margin(6, 0, 6, 0).Padding(6).Gap(2).Radius(10).
 			Background(p.panel).Border(1, p.hairline).
 			Shadow(0, 10, 28, 2, p.cardShade)
+		a.installMenuItem(c, "插件市场…", iconPlugin, func() {
+			a.openMarket()
+		})
 		a.installMenuItem(c, "从文件夹…", iconFolder, func() {
 			a.installMenu = false
 			a.installFolder()
@@ -379,6 +382,13 @@ func (a *app) installFailed(err error) {
 // installDir copies a plugin folder, if it loads, into the plugins
 // directory, and lists the sources again.
 func (a *app) installDir(src, origin string) (string, error) {
+	return a.installDirAt(src, origin, false)
+}
+
+// installDirAt copies a plugin folder into the plugins directory. When
+// replace is set, an installed plugin of the same id gives way to the new
+// files; its data directory and whether it was on stay as they are.
+func (a *app) installDirAt(src, origin string, replace bool) (string, error) {
 	p, err := plugin.Load(src, a.pluginDataDir)
 	if err != nil {
 		return "", fmt.Errorf("这不是一个插件：%w", err)
@@ -386,11 +396,38 @@ func (a *app) installDir(src, origin string) (string, error) {
 	name, id := p.Info().Name, p.Info().ID
 	p.Close()
 	dst := filepath.Join(a.pluginsDir, id)
+	installed := false
 	if _, err := os.Stat(dst); err == nil {
-		return "", fmt.Errorf("已经装了 %s", name)
+		installed = true
+		if !replace {
+			return "", fmt.Errorf("已经装了 %s", name)
+		}
+		if pe := a.pluginEntryByID(id); pe != nil && pe.p != nil {
+			pe.p.Close()
+			pe.p = nil
+		}
 	}
-	if err := copyDir(src, dst); err != nil {
-		os.RemoveAll(dst)
+	stage := filepath.Join(a.pluginsDir, ".staging-"+id)
+	old := filepath.Join(a.pluginsDir, ".old-"+id)
+	os.RemoveAll(stage)
+	os.RemoveAll(old)
+	if err := copyDir(src, stage); err != nil {
+		os.RemoveAll(stage)
+		return "", err
+	}
+	if installed {
+		if err := os.Rename(dst, old); err != nil {
+			os.RemoveAll(stage)
+			return "", fmt.Errorf("换掉旧版失败：%w", err)
+		}
+		if err := os.Rename(stage, dst); err != nil {
+			_ = os.Rename(old, dst)
+			os.RemoveAll(stage)
+			return "", fmt.Errorf("放上新版失败：%w", err)
+		}
+		os.RemoveAll(old)
+	} else if err := os.Rename(stage, dst); err != nil {
+		os.RemoveAll(stage)
 		return "", err
 	}
 	a.store.SetPluginInstalled(id, origin)
