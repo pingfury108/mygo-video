@@ -9,6 +9,7 @@
 #include <libswresample/swresample.h>
 #include <libavutil/opt.h>
 #include <libavutil/time.h>
+#include <math.h>
 #include <stdio.h>
 
 // The device and client interfaces, whose identifiers mingw does not carry.
@@ -21,7 +22,15 @@ static const GUID IID_RENDER = {0xf294acfc,0x3146,0x4483,{0xa7,0xbf,0xad,0xdc,0x
 // interface no device has, and the sound falls back to its buffer's padding,
 // which misses what the mixer still holds.
 static const GUID IID_CLOCK = {0xcd63314f,0x3fba,0x4a1b,{0x81,0x2c,0xef,0x96,0x35,0x87,0x28,0xe7}};
+// IID_SIMPLE_VOLUME is ISimpleAudioVolume, whose identifier mingw leaves to
+// uuid.lib, which this build does not link.
+static const GUID IID_SIMPLE_VOLUME = {0x87ce5498,0x68d6,0x44e5,{0x92,0x15,0x6d,0xa4,0x7e,0xf8,0x83,0xd8}};
 static const GUID CLSID_ENUM = {0xbcde0395,0xe52f,0x467c,{0x8e,0x3d,0xc4,0x57,0x92,0x91,0x69,0x2e}};
+// The two subformats a shared-mode mix format names, whose identifiers
+// come from ksmedia.h: the header is not carried here, and a PCM format
+// read as float writes noise into the device.
+static const GUID SUBTYPE_PCM = {0x00000001,0x0000,0x0010,{0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71}};
+static const GUID SUBTYPE_FLOAT = {0x00000003,0x0000,0x0010,{0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71}};
 
 
 typedef struct {
@@ -32,6 +41,10 @@ typedef struct {
 
 	IAudioClient       *client;
 	IAudioRenderClient *render;
+	// volume is the session's own level, which the app's slider moves:
+	// the device's mixer carries it, so a change is heard at once and the
+	// samples written here stay what the decoder made.
+	ISimpleAudioVolume *volume;
 	// clock is the device's own playback position, which counts what the
 	// mixer holds and the padding of the buffer does not.
 	IAudioClock        *clock;
@@ -49,13 +62,24 @@ typedef struct {
 	UINT64              written; // frames handed to the device
 	UINT32              chunk; // frames a buffer holds
 	int                 rate;  // samples a second the device takes
+	// speed is how fast the film plays: the resampler makes the device's
+	// rate carry that much more of the source, and the place read off the
+	// device is put back on the film's timeline by it.
+	double              speed;
 	int                 channels;
 	int                 bytes; // a frame of all channels
+	int                 sampleBytes; // a sample swr made, which 24-bit PCM packs
+	// outFmt is what swr writes into the device's buffer, from the mix
+	// format the device answered with.
+	enum AVSampleFormat outFmt;
 	HANDLE              event;
 	int                 noWait; // the first fill before the device runs waits for none
 	int                 started;
 	int                 eof;    // the sound of the file is over
 	int                 readErrs; // reads in a row that failed
+	// abort is the engine's close flag, shared with the picture's decoder:
+	// a read that waits on the network is given up when the window closes.
+	void               *abort;
 	// startUs is the place the sound was sought to: the frames of earlier
 	// places are dropped, as a seek lands before the one asked for.
 	int64_t             startUs;
@@ -78,6 +102,61 @@ typedef struct {
 } Audio;
 
 static void audio_trace(Audio *a, const char *what, int n);
+static int audio_swr_init(Audio *a);
+
+// audio_out_format reads what the device's mix format holds. Shared mode
+// answers with WAVE_FORMAT_EXTENSIBLE on most drivers, where the tag says
+// nothing and the subformat says whether the bits are PCM or float; the
+// valid bits are the ones to write, not the size of the container.
+static int audio_out_format(Audio *a, const WAVEFORMATEX *fmt) {
+	WORD tag = fmt->wFormatTag;
+	WORD bits = fmt->wBitsPerSample;
+	if (tag == WAVE_FORMAT_EXTENSIBLE && fmt->cbSize >= 22) {
+		const WAVEFORMATEXTENSIBLE *ext = (const WAVEFORMATEXTENSIBLE *)fmt;
+		if (IsEqualGUID(&ext->SubFormat, &SUBTYPE_FLOAT)) {
+			tag = WAVE_FORMAT_IEEE_FLOAT;
+		} else if (IsEqualGUID(&ext->SubFormat, &SUBTYPE_PCM)) {
+			tag = WAVE_FORMAT_PCM;
+		}
+		if (ext->Samples.wValidBitsPerSample) {
+			bits = ext->Samples.wValidBitsPerSample;
+		}
+	}
+	switch (tag) {
+	case WAVE_FORMAT_PCM:
+		switch (bits) {
+		case 8:  a->outFmt = AV_SAMPLE_FMT_U8;  break;
+		case 16: a->outFmt = AV_SAMPLE_FMT_S16; break;
+		case 24: // packed 3-byte samples, which swr makes as 32 and this packs
+		case 32: a->outFmt = AV_SAMPLE_FMT_S32; break;
+		default: return -15;
+		}
+		break;
+	case WAVE_FORMAT_IEEE_FLOAT:
+		switch (bits) {
+		case 32: a->outFmt = AV_SAMPLE_FMT_FLT; break;
+		case 64: a->outFmt = AV_SAMPLE_FMT_DBL; break;
+		default: return -15;
+		}
+		break;
+	default:
+		// An unknown tag is the device's own; 16 bits is the one every
+		// driver takes, and float is the default of shared mode.
+		if (bits == 16) a->outFmt = AV_SAMPLE_FMT_S16;
+		else a->outFmt = AV_SAMPLE_FMT_FLT;
+		break;
+	}
+	a->sampleBytes = av_get_bytes_per_sample(a->outFmt);
+	return 0;
+}
+
+static int audio_interrupted(Audio *a) {
+	return a->abort && *(volatile LONG *)a->abort != 0;
+}
+
+static int audio_interrupt_cb(void *opaque) {
+	return audio_interrupted((Audio *)opaque);
+}
 
 // audio_open reads the sound of the video at url, and asks the default output
 // device for the format it takes.
@@ -111,6 +190,37 @@ static void audio_line(const char *msg) {
 	fclose(f);
 }
 
+// audio_swr_init rebuilds the resampler, which a seek and a change of speed
+// both need: the output rate is the device's rate divided by the speed, so
+// the device plays a second of the film in 1/speed seconds.
+static int audio_swr_init(Audio *a) {
+	if (a->swr) swr_free(&a->swr);
+	if (a->speed <= 0) a->speed = 1;
+	int outRate = (int)lrint((double)a->rate / a->speed);
+	if (outRate < 1000) outRate = 1000;
+	AVChannelLayout layout;
+	av_channel_layout_default(&layout, a->channels);
+	a->swr = swr_alloc();
+	if (!a->swr) {
+		av_channel_layout_uninit(&layout);
+		return -14;
+	}
+	av_opt_set_chlayout(a->swr, "in_chlayout", &a->dec->ch_layout, 0);
+	av_opt_set_int(a->swr, "in_sample_rate", a->dec->sample_rate, 0);
+	av_opt_set_sample_fmt(a->swr, "in_sample_fmt", a->dec->sample_fmt, 0);
+	av_opt_set_chlayout(a->swr, "out_chlayout", &layout, 0);
+	av_opt_set_int(a->swr, "out_sample_rate", outRate, 0);
+	av_opt_set_sample_fmt(a->swr, "out_sample_fmt", a->outFmt, 0);
+	av_channel_layout_uninit(&layout);
+	if (swr_init(a->swr) < 0) {
+		swr_free(&a->swr);
+		return -15;
+	}
+	a->pcmFrames = 0;
+	a->pcmAt = 0;
+	return 0;
+}
+
 static void audio_apartment(void) {
 	if (!t_apartment) {
 		CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -119,8 +229,11 @@ static void audio_apartment(void) {
 }
 
 static int audio_open(Audio *a, const char *url, const char *headers, int64_t startUs,
+                      double speed,
+                      void *abort,
                       int *outRate, int *outChannels) {
 	memset(a, 0, sizeof(*a));
+	a->abort = abort;
 	avformat_network_init();
 	AVDictionary *opts = NULL;
 	if (headers && headers[0]) av_dict_set(&opts, "headers", headers, 0);
@@ -132,6 +245,13 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	av_dict_set(&opts, "reconnect_delay_max", "4", 0);
 	av_dict_set(&opts, "rw_timeout", "15000000", 0);
 	audio_line("audio_open: open input");
+	a->fmt = avformat_alloc_context();
+	if (!a->fmt) {
+		av_dict_free(&opts);
+		return -1;
+	}
+	a->fmt->interrupt_callback.callback = audio_interrupt_cb;
+	a->fmt->interrupt_callback.opaque = a;
 	if (avformat_open_input(&a->fmt, url, NULL, &opts) < 0) return -1;
 	av_dict_free(&opts);
 	audio_line("audio_open: input opened");
@@ -191,27 +311,20 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	WAVEFORMATEX *fmt = NULL;
 	if (FAILED(a->client->lpVtbl->GetMixFormat(a->client, &fmt))) return -13;
 	a->rate = fmt->nSamplesPerSec;
+	a->speed = speed > 0 ? speed : 1;
 	a->channels = fmt->nChannels;
 	a->bytes = fmt->nBlockAlign;
 	if (outRate) *outRate = a->rate;
 	if (outChannels) *outChannels = a->channels;
 
-	enum AVSampleFormat outFmt = AV_SAMPLE_FMT_FLT;
-	if (fmt->wFormatTag == WAVE_FORMAT_PCM || fmt->wBitsPerSample == 16) {
-		outFmt = AV_SAMPLE_FMT_S16;
+	if (audio_out_format(a, fmt) < 0) {
+		CoTaskMemFree(fmt);
+		return -15;
 	}
-	AVChannelLayout layout;
-	av_channel_layout_default(&layout, a->channels);
-	a->swr = swr_alloc();
-	if (!a->swr) return -14;
-	av_opt_set_chlayout(a->swr, "in_chlayout", &a->dec->ch_layout, 0);
-	av_opt_set_int(a->swr, "in_sample_rate", a->dec->sample_rate, 0);
-	av_opt_set_sample_fmt(a->swr, "in_sample_fmt", a->dec->sample_fmt, 0);
-	av_opt_set_chlayout(a->swr, "out_chlayout", &layout, 0);
-	av_opt_set_int(a->swr, "out_sample_rate", a->rate, 0);
-	av_opt_set_sample_fmt(a->swr, "out_sample_fmt", outFmt, 0);
-	av_channel_layout_uninit(&layout);
-	if (swr_init(a->swr) < 0) return -15;
+	if (audio_swr_init(a) < 0) {
+		CoTaskMemFree(fmt);
+		return -15;
+	}
 
 	REFERENCE_TIME dur = 10000000LL * 2 / 10; // 200ms of buffer, as mpv's
 	// Read before the format is freed, which is where a wild value came
@@ -247,6 +360,16 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 	if (FAILED(a->client->lpVtbl->GetBufferSize(a->client, &a->chunk))) return -17;
 	if (FAILED(a->client->lpVtbl->GetService(a->client, &IID_RENDER,
 		(void **)&a->render))) return -18;
+	// The app's volume belongs to the session, not to the samples: the
+	// device multiplies them on the way out, as a mixer does, so changing
+	// it does not need the buffer rewritten.
+	if (SUCCEEDED(a->client->lpVtbl->GetService(a->client, &IID_SIMPLE_VOLUME,
+		(void **)&a->volume))) {
+		audio_line("audio_open: volume service");
+	} else {
+		a->volume = NULL;
+		audio_line("audio_open: no volume service");
+	}
 	// The device's clock counts the frames it has played, mixer and all: the
 	// buffer's padding misses what the mixer still holds, and a playhead read
 	// from it runs ahead of the sound by that much.
@@ -266,7 +389,10 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 		audio_line("audio_open: no clock service");
 	}
 	a->tb = a->fmt->streams[a->stream]->time_base;
-	if (startUs > 0) audio_seek(a, startUs);
+	// A seek at open that failed would leave the sound at the start while
+	// the picture begins further on: the playhead would be right and the
+	// sound wrong for the whole of the film, so the caller is told.
+	if (startUs > 0 && audio_seek(a, startUs) != 0) return -19;
 	audio_line("audio_open: device ready");
 	return 0;
 }
@@ -275,6 +401,7 @@ static int audio_open(Audio *a, const char *url, const char *headers, int64_t st
 // frames are ready, or 0 at the end, or a negative step that failed.
 static int audio_decode(Audio *a) {
 	for (;;) {
+		if (audio_interrupted(a)) return -99;
 		int r = avcodec_receive_frame(a->dec, a->frame);
 		if (r == 0) {
 			// The frame's own place, where the container gave only a decode
@@ -309,7 +436,7 @@ static int audio_decode(Audio *a) {
 			int cap = swr_get_out_samples(a->swr,
 				a->frame->nb_samples + (a->frame->nb_samples % 100));
 			if (cap <= 0) cap = a->frame->nb_samples * 2 + 256;
-			int need = cap * a->channels * 4;
+			int need = cap * a->channels * a->sampleBytes;
 			if (!a->pcm || a->pcmFrames < need) {
 				uint8_t *p = av_realloc(a->pcm, need);
 				if (!p) return -21;
@@ -331,6 +458,7 @@ static int audio_decode(Audio *a) {
 		if (r != AVERROR(EAGAIN)) return -23;
 		int rr = av_read_frame(a->fmt, a->pkt);
 		if (rr < 0 && rr != AVERROR_EOF) {
+			if (audio_interrupted(a)) return -99;
 			// A read that failed partway is not the end of the sound: a
 			// source that stalls is tried again, and only a run of failed
 			// reads gives up, where the picture may then outlast it.
@@ -387,8 +515,25 @@ static int audio_fill(Audio *a) {
 		int avail = a->pcmFrames - a->pcmAt;
 		int take = (int)(want - done);
 		if (take > avail) take = avail;
-		memcpy(data + done * a->bytes,
-			a->pcm + (size_t)a->pcmAt * a->bytes, (size_t)take * a->bytes);
+		// A packed 24-bit PCM device holds three bytes of a sample that
+		// swr made as four: the top three are the ones it plays, and the
+		// low byte of the 32-bit sample is dropped.
+		if (a->sampleBytes * a->channels == a->bytes) {
+			memcpy(data + (size_t)done * a->bytes,
+				a->pcm + (size_t)a->pcmAt * a->bytes,
+				(size_t)take * a->bytes);
+		} else if (a->sampleBytes == 4 && a->bytes == a->channels * 3) {
+			const uint8_t *src = a->pcm + (size_t)a->pcmAt * a->sampleBytes * a->channels;
+			uint8_t *dst = data + (size_t)done * a->bytes;
+			for (int i = 0; i < take * a->channels; i++) {
+				dst[i * 3 + 0] = src[i * 4 + 1];
+				dst[i * 3 + 1] = src[i * 4 + 2];
+				dst[i * 3 + 2] = src[i * 4 + 3];
+			}
+		} else {
+			a->render->lpVtbl->ReleaseBuffer(a->render, done, 0);
+			return -27;
+		}
 		a->pcmAt += take;
 		done += take;
 	}
@@ -436,12 +581,11 @@ static void audio_pause(Audio *a) {
 // off it runs ahead too. Read against the padding the device reports, it says
 // which of the two the position is.
 static void audio_probe(Audio *a, UINT64 position, UINT64 qpcPosition, int64_t us) {
-	static int n;
-	if (a->probeLeft > 0) {
-		a->probeLeft--;
-	} else if ((n++ & 127) != 0) {
-		return;
-	}
+	// Only the reads just after a seek are worth writing down: every read
+	// of the device, once every few milliseconds, filled the log without
+	// saying anything a listener would not see.
+	if (a->probeLeft <= 0) return;
+	a->probeLeft--;
 	const char *tmp = getenv("TEMP");
 	if (!tmp) return;
 	char path[512];
@@ -491,6 +635,10 @@ static int64_t audio_position(Audio *a) {
 			// The clock read when it read, not now: the time since is the
 			// device's own, and the place moves on by it.
 			if (behind > 0 && behind < 10 * 10000000LL) us += behind / 10;
+			// The device's own time is the film's divided by the speed:
+			// put it back on the film's timeline before the place of the
+			// first frame is added, which is already a film timestamp.
+			if (a->speed != 1.0) us = (int64_t)((double)us * a->speed);
 			if (us > 0) {
 				// The samples count from the first frame that reached the
 				// device, which a seek leaves past the place it asked for:
@@ -503,7 +651,7 @@ static int64_t audio_position(Audio *a) {
 	UINT32 pad = 0;
 	if (FAILED(a->client->lpVtbl->GetCurrentPadding(a->client, &pad))) return 0;
 	UINT64 played = a->written > pad ? a->written - pad : 0;
-	return (int64_t)(played * 1000000ULL / (UINT64)a->rate);
+	return (int64_t)((double)played * 1000000.0 * a->speed / (double)a->rate);
 }
 
 // audio_delay is how long the sound held in the device will take to play, in
@@ -529,6 +677,7 @@ static int audio_ended(Audio *a) { return a->eof; }
 static void audio_close(Audio *a) {
 	audio_apartment();
 	if (a->client) a->client->lpVtbl->Stop(a->client);
+	if (a->volume) a->volume->lpVtbl->Release(a->volume);
 	if (a->clock) a->clock->lpVtbl->Release(a->clock);
 	if (a->render) a->render->lpVtbl->Release(a->render);
 	if (a->client) a->client->lpVtbl->Release(a->client);
@@ -542,6 +691,27 @@ static void audio_close(Audio *a) {
 	memset(a, 0, sizeof(*a));
 }
 
+// audio_set_volume sets the session's level, from 0 to 1. It is called on
+// the thread that owns the sound, as every other call into WASAPI is.
+static int audio_set_volume(Audio *a, float v) {
+	audio_apartment();
+	if (!a->volume) return -40;
+	if (v < 0) v = 0;
+	if (v > 1) v = 1;
+	if (FAILED(a->volume->lpVtbl->SetMasterVolume(a->volume, v, NULL)))
+		return -41;
+	return 0;
+}
+
+// audio_set_mute silences the session, or plays it again.
+static int audio_set_mute(Audio *a, int m) {
+	audio_apartment();
+	if (!a->volume) return -40;
+	if (FAILED(a->volume->lpVtbl->SetMute(a->volume, m ? TRUE : FALSE, NULL)))
+		return -42;
+	return 0;
+}
+
 // audio_seek goes to us in the sound, and empties what the device holds, so
 // the sound follows the picture there rather than playing from the start.
 static int audio_seek(Audio *a, int64_t us) {
@@ -553,8 +723,10 @@ static int audio_seek(Audio *a, int64_t us) {
 	int64_t ts = av_rescale_q(us, AV_TIME_BASE_Q, st->time_base);
 	if (av_seek_frame(a->fmt, a->stream, ts, AVSEEK_FLAG_BACKWARD) < 0) return -31;
 	if (a->dec) avcodec_flush_buffers(a->dec);
-	a->pcmFrames = 0;
-	a->pcmAt = 0;
+	// The resampler holds what the frames before the seek left: rebuilding
+	// it drops them, rather than mixing a few milliseconds of the place
+	// left behind into the new one.
+	if (audio_swr_init(a) < 0) return -32;
 	a->haveFirst = 0;
 	// Stop and empty the device before the clock is read: the place it stands
 	// at then is the place the new sound starts counting from, and reading it
@@ -582,6 +754,18 @@ static int audio_seek(Audio *a, int64_t us) {
 	         (long long)us, (long long)a->posBase, a->posBaseSet);
 	audio_line(msg);
 	return 0;
+}
+
+// audio_set_speed makes the film play speed times as fast. The output rate
+// follows it, and the seek the engine sends next anchors the place the new
+// rate counts from.
+static int audio_set_speed(Audio *a, double speed) {
+	audio_apartment();
+	if (speed < 0.25) speed = 0.25;
+	if (speed > 4) speed = 4;
+	if (fabs(speed - a->speed) < 0.000001) return 0;
+	a->speed = speed;
+	return audio_swr_init(a);
 }
 
 // audio_trace writes what the device reports, for the sync that does not hold.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -26,6 +27,9 @@ type winFrames struct {
 	seekUs int64
 	seeked bool
 	gen    int64
+	// seeking says a seek has begun and its call has not returned: a picture
+	// decoded meanwhile belongs to neither place, and is passed over.
+	seeking bool
 	// busy marks the picture slots the engine still holds, and next is the
 	// slot after the last one taken: slots come round in turn, so one a
 	// picture just left is not filled again until the others have been.
@@ -103,8 +107,12 @@ func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
 		return ui.VideoPicture{}, 0, errNoSlot
 	}
 	w.mu.Lock()
-	gen, seeked, seekUs := w.gen, w.seeked, w.seekUs
+	gen, seeked, seekUs, seeking := w.gen, w.seeked, w.seekUs, w.seeking
 	w.mu.Unlock()
+	if seeking {
+		w.freeSlot(slot)
+		return ui.VideoPicture{}, 0, errStale
+	}
 
 	f, err := w.d.Next()
 	if err != nil {
@@ -118,7 +126,7 @@ func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
 	// A seek came while this one decoded: its place belongs to where the
 	// playback no longer is, and it is not worth a conversion.
 	w.mu.Lock()
-	stale := w.gen != gen
+	stale := w.gen != gen || w.seeking
 	w.mu.Unlock()
 	if stale {
 		w.freeSlot(slot)
@@ -138,7 +146,7 @@ func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
 	off := time.Duration(0)
 	tb := w.d.Timebase()
 	w.mu.Lock()
-	if w.gen != gen {
+	if w.gen != gen || w.seeking {
 		// A seek came while this one decoded: its place belongs to where the
 		// playback no longer is, and its PTS must not anchor the new place.
 		w.mu.Unlock()
@@ -170,10 +178,20 @@ func (w *winFrames) Next() (ui.VideoPicture, time.Duration, error) {
 func (w *winFrames) Seek(d time.Duration) error {
 	w.mu.Lock()
 	w.gen++
-	w.seekUs = d.Microseconds()
-	w.seeked = true
+	w.seeking = true
 	w.mu.Unlock()
-	return w.d.Seek(d)
+	err := w.d.Seek(d)
+	w.mu.Lock()
+	if err == nil {
+		// The place is committed only by a seek that landed: one that
+		// failed would otherwise measure the next pictures from a place
+		// the decoder never reached.
+		w.seekUs = d.Microseconds()
+		w.seeked = true
+	}
+	w.seeking = false
+	w.mu.Unlock()
+	return err
 }
 
 func (w *winFrames) SetSkip(on bool)         { w.d.Skip(on) }
@@ -198,36 +216,67 @@ func (w winAudio) Play()                    { w.a.Play() }
 func (w winAudio) Pause()                   { w.a.Pause() }
 func (w winAudio) Done() bool               { return w.a.Ended() }
 func (w winAudio) Close()                   { w.a.Close() }
+func (w winAudio) SetVolume(v float64) int  { return w.a.SetVolume(v) }
+func (w winAudio) SetMuted(m bool) int      { return w.a.SetMuted(m) }
+func (w winAudio) SetRate(r float64) int    { return w.a.SetRate(r) }
 
 // NewEngine reads url and plays it on the GPU. The read happens apart, so the
 // window never waits for the network.
 func NewEngine(url string, headers []string) (*Engine, error) {
 	e := newEngine(nil, nil)
-	go e.open(url, headers)
+	// The picture and the sound share one flag that says the engine is
+	// closing: a read waiting on the network gives up at once instead of
+	// holding the window's close for its timeout.
+	flag := newAbortFlag()
+	e.mu.Lock()
+	e.abortIO = func() { setAbortFlag(flag) }
+	e.finishIO = func() { freeAbortFlag(flag) }
+	e.mu.Unlock()
+	e.wg.Add(1)
+	go e.open(url, headers, flag)
 	return e, nil
 }
 
+// openFailed reports why the file could not be opened, unless the engine is
+// closing: a read interrupted by the close is not a failure of the film.
+func (e *Engine) openFailed(err error) {
+	audioLog(err.Error())
+	e.mu.Lock()
+	if !e.stopped {
+		e.err = err
+		e.state = ui.VideoFailed
+	}
+	e.mu.Unlock()
+}
+
 // open reads the video and the sound, and starts both.
-func (e *Engine) open(url string, headers []string) {
+func (e *Engine) open(url string, headers []string, abort unsafe.Pointer) {
+	defer e.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
 			audioLog(fmt.Sprintf("open panic: %v", r))
 		}
 	}()
 	audioLog("open: " + url)
-	d, err := Open(url, headers)
+	d, err := Open(url, headers, abort)
 	if err != nil {
-		e.mu.Lock()
-		e.err = err
-		e.state = ui.VideoFailed
-		e.mu.Unlock()
-		audioLog("video: " + err.Error())
+		e.openFailed(err)
+		return
+	}
+	// A close may have come while the file opened. Nothing holds the
+	// decoder yet, so it is let go here and Close's wait can finish.
+	e.mu.Lock()
+	stopped := e.stopped
+	e.mu.Unlock()
+	if stopped {
+		_ = d.Close()
 		return
 	}
 	// The picture and the sound begin where the playhead stands: a seek may
 	// have come before either was ready.
 	e.mu.Lock()
 	startAt := e.at
+	rate := e.rate
 	e.mu.Unlock()
 	nf := newWinFrames(d)
 	if startAt > 0 {
@@ -239,19 +288,79 @@ func (e *Engine) open(url string, headers []string) {
 			audioLog("video seek: " + err.Error())
 		}
 	}
+	// A seek can land while the picture opens: the sound starts at the
+	// newest place, not the one read before the read.
+	e.mu.Lock()
+	startAt = e.at
+	rate = e.rate
+	e.mu.Unlock()
 	audioLog("audio opening")
 	var snd clock
-	if a, aerr := openAudio(url, headers, startAt); aerr == nil {
+	if a, aerr := openAudio(url, headers, startAt, rate, abort); aerr == nil {
 		snd = winAudio{a}
 		audioLog("audio made")
 	} else {
 		audioLog("audio: " + aerr.Error())
+		if errors.Is(aerr, errAudioSeek) {
+			// The sound could not follow the picture to the place asked
+			// for: playing it from the start would be a different film,
+			// so the playback is reported as failed for the app to try
+			// its next way in.
+			e.openFailed(aerr)
+			_ = nf.Close()
+			return
+		}
+	}
+	// The place may have moved again while the sound opened. Both are
+	// moved to the newest one before either is published, so nothing of
+	// the place left behind is shown or heard.
+	e.mu.Lock()
+	stopped, latest := e.stopped, e.at
+	e.mu.Unlock()
+	if stopped {
+		if snd != nil {
+			snd.Close()
+		}
+		_ = nf.Close()
+		return
+	}
+	if latest != startAt {
+		audioLog(fmt.Sprintf("open: moved to %v while opening", latest))
+		if err := nf.Seek(latest); err != nil {
+			e.openFailed(err)
+			if snd != nil {
+				snd.Close()
+			}
+			_ = nf.Close()
+			return
+		}
+		if snd != nil {
+			if rc := snd.Seek(latest); rc != 0 {
+				e.openFailed(fmt.Errorf("gpudecode: sound seek at step %d", rc))
+				snd.Close()
+				_ = nf.Close()
+				return
+			}
+		}
+		startAt = latest
 	}
 	e.mu.Lock()
-	e.src = nf
-	e.snd = snd
+	// A drag that came between the check and now is left to the engine's
+	// own seek: it is the same path every later drag takes.
+	stopped, moved := e.stopped, e.at
+	if !stopped {
+		e.src = nf
+		e.snd = snd
+	}
 	wake := e.wake
 	e.mu.Unlock()
+	if stopped {
+		if snd != nil {
+			snd.Close()
+		}
+		_ = nf.Close()
+		return
+	}
 	audioLog("open done")
 	if wake != nil {
 		wake()
@@ -259,5 +368,8 @@ func (e *Engine) open(url string, headers []string) {
 	if snd != nil {
 		e.wg.Add(1)
 		go e.runSound()
+	}
+	if moved != startAt {
+		e.Seek(moved)
 	}
 }

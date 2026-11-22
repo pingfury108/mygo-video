@@ -86,12 +86,20 @@ type Engine struct {
 	src frames
 	snd clock
 
-	mu      sync.Mutex
-	wg      sync.WaitGroup // the decoder and the sound, until they stop
-	wake    func()
-	queue   []queued
-	current ui.VideoPicture
-	base    time.Duration
+	mu sync.Mutex
+	wg sync.WaitGroup // the decoder and the sound, until they stop
+	// seekWG is the seeks whose decoder call has not returned: the decoder
+	// is not freed until they have, and the platform's close flag makes
+	// them return.
+	seekWG sync.WaitGroup
+	// abortIO and finishIO are the platform's way of interrupting the reads
+	// that wait on the network, and of giving back the flag.
+	abortIO  func()
+	finishIO func()
+	wake     func()
+	queue    []queued
+	current  ui.VideoPicture
+	base     time.Duration
 
 	at       time.Duration // where the playhead stood when playback began
 	audioPos time.Duration // where the sound stood, read off the frame
@@ -110,6 +118,8 @@ type Engine struct {
 	clock    time.Time // when playback began, zero while paused
 	paused   bool
 	rate     float64
+	volume   float64
+	muted    bool
 	// sndSeek is a seek for the thread that owns the device to make: the
 	// call reads the source and must not hold the window.
 	sndSeek *time.Duration
@@ -135,6 +145,10 @@ type Engine struct {
 	// seekSeq numbers the seeks: a drag sends many, and only the last is
 	// worth the decoder's while, as mpv merges its seeks.
 	seekSeq int64
+	// seekLanded is the seek whose decoder call has returned. fill waits on
+	// it after the end of a film: a seek moves the decoder off its end, but
+	// not before the call has reached it.
+	seekLanded int64
 	// stall counts the fills in a row that wrote nothing, for a source that
 	// went quiet: past a minute the two stand together again where the film
 	// is, as mpv resets its audio for an underrun.
@@ -191,11 +205,10 @@ type queued struct {
 	pic ui.VideoPicture
 }
 
-// newEngine makes an engine of a decoder and a clock, which it owns.
 // newEngine makes an engine of a decoder and a clock, either of which may be
 // nil while the platform part still opens: fill and runSound wait for it.
 func newEngine(src frames, snd clock) *Engine {
-	e := &Engine{src: src, snd: snd, rate: 1, state: ui.VideoLoading}
+	e := &Engine{src: src, snd: snd, rate: 1, volume: 1, state: ui.VideoLoading}
 	e.wg.Add(1)
 	go e.fill()
 	if snd != nil {
@@ -216,6 +229,10 @@ func (e *Engine) runSound() {
 	// The sound's calls reach WASAPI, whose apartment belongs to a thread:
 	// the thread is pinned and given one of its own here.
 	lockSoundThread()
+	// The app's level and mute go to the device once, and then only when
+	// they change, from this thread that owns the sound.
+	lastVolume, lastMuted := -1.0, false
+	lastRate := -1.0
 	// The sound waits for the picture to have something to show: started
 	// first, it ran through the first frames of the film while the decoder
 	// was still filling up, and a playback began a third of a second apart.
@@ -233,6 +250,8 @@ func (e *Engine) runSound() {
 	for {
 		e.mu.Lock()
 		stopped, paused := e.stopped, e.paused
+		volume, muted := e.volume, e.muted
+		rate := e.rate
 		seekReq := e.sndSeek
 		e.sndSeek = nil
 		// The sound waits for a picture of the place it was just sent to:
@@ -242,12 +261,35 @@ func (e *Engine) runSound() {
 		if stopped {
 			return
 		}
+		if volume != lastVolume || muted != lastMuted {
+			if vc, ok := e.snd.(interface {
+				SetVolume(float64) int
+				SetMuted(bool) int
+			}); ok {
+				vc.SetVolume(volume)
+				vc.SetMuted(muted)
+			}
+			lastVolume, lastMuted = volume, muted
+		}
+		if rate != lastRate {
+			if rc, ok := e.snd.(interface{ SetRate(float64) int }); ok {
+				rc.SetRate(rate)
+			}
+			lastRate = rate
+		}
 		// The sound is sought here, on its own thread: the seek reads the
 		// source over the network, and a window waiting for that would stop
 		// drawing for as long as it took.
 		if seekReq != nil {
-			e.snd.Seek(*seekReq)
+			rc := e.snd.Seek(*seekReq)
 			e.mu.Lock()
+			if rc != 0 && !e.stopped {
+				// The picture was moved and the sound was not: the two
+				// would stand apart for the rest of the film, so the retry
+				// is asked for at once.
+				e.err = fmt.Errorf("gpudecode: sound seek at step %d", rc)
+				e.state = ui.VideoFailed
+			}
 			e.sndPending = false
 			e.mu.Unlock()
 			continue
@@ -278,6 +320,19 @@ func (e *Engine) runSound() {
 		}
 		e.snd.Play()
 		n := e.snd.Fill()
+		if n < 0 {
+			// The sound failed in the device, not merely ran out for a
+			// moment: playing on would leave a silent picture that looks
+			// in step while nothing is heard. The app takes its next way
+			// in, as it does for a picture that failed.
+			e.mu.Lock()
+			if !e.stopped && e.state != ui.VideoFailed {
+				e.err = fmt.Errorf("gpudecode: sound at step %d", n)
+				e.state = ui.VideoFailed
+			}
+			e.mu.Unlock()
+			return
+		}
 		if n <= 0 {
 			// Nothing was written. A device whose buffer is still full is
 			// one the writing waits on, not one that starved: its fills
@@ -416,11 +471,11 @@ func (e *Engine) fill() {
 	}()
 	for {
 		e.mu.Lock()
-		if e.stopped {
+		if e.stopped || e.state == ui.VideoFailed {
 			e.mu.Unlock()
 			return
 		}
-		src, paused, queueLen, seekSeq := e.src, e.paused, len(e.queue), e.seekSeq
+		src, paused, starting, queueLen, seekSeq := e.src, e.paused, e.starting, len(e.queue), e.seekSeq
 		e.mu.Unlock()
 		// Keep the pictures the decoder can hold ready. The GPU path converts
 		// each one into a texture of its own, and has only a few slots; a
@@ -444,7 +499,11 @@ func (e *Engine) fill() {
 				ahead = n
 			}
 		}
-		if queueLen >= ahead || paused || src == nil {
+		// A seek while paused still fills the first picture of the new
+		// place: a player shows it there as the bar is let go, as mpv does,
+		// rather than holding the picture of the place left behind until
+		// the play goes on.
+		if queueLen >= ahead || (paused && !starting) || src == nil {
 			// This is the worker that keeps the queue full, not the scheduler:
 			// the window takes a picture off the top each of its frames, and the
 			// queue has to be refilled as it goes. Sleeping long here left it
@@ -470,13 +529,37 @@ func (e *Engine) fill() {
 			e.mu.Lock()
 			e.ended = true
 			e.state = ui.VideoEnded
+			seq := e.seekSeq
 			e.mu.Unlock()
-			return
+			// The decoder stands at the end, not gone: a seek moves it
+			// back into the film, and the pictures go on from there. It is
+			// waited for rather than returned from, as mpv keeps its
+			// demuxer after the end and seeks it when the film plays
+			// again.
+			for {
+				e.mu.Lock()
+				stopped := e.stopped
+				moved := e.seekSeq != seq && e.seekLanded >= e.seekSeq
+				e.mu.Unlock()
+				if stopped {
+					return
+				}
+				if moved {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			continue
 		}
 		if err != nil {
 			e.mu.Lock()
-			e.err = err
-			e.state = ui.VideoFailed
+			// A close that interrupts a read is not a failure of the film,
+			// and a seek that already named its own error is the one worth
+			// keeping.
+			if !e.stopped && e.state != ui.VideoFailed {
+				e.err = err
+				e.state = ui.VideoFailed
+			}
 			e.mu.Unlock()
 			return
 		}
@@ -1003,6 +1086,10 @@ func (e *Engine) Pause() {
 // Seek goes to d, restarting the decoder and the sound there.
 func (e *Engine) Seek(d time.Duration) {
 	e.mu.Lock()
+	if e.stopped {
+		e.mu.Unlock()
+		return
+	}
 	oldQueue, oldCurrent := e.queue, e.current
 	e.queue = nil
 	e.at = d
@@ -1033,6 +1120,11 @@ func (e *Engine) Seek(d time.Duration) {
 	// and only the last runs.
 	e.seekSeq++
 	seq := e.seekSeq
+	if src != nil {
+		// The decoder is not freed until a seek that is already inside it
+		// has returned: Close waits on this, rather than freeing under it.
+		e.seekWG.Add(1)
+	}
 	e.mu.Unlock()
 	if src != nil {
 		// The pictures of the place left behind still hold their slots:
@@ -1049,16 +1141,27 @@ func (e *Engine) Seek(d time.Duration) {
 	}
 	if src != nil {
 		go func() {
+			defer e.seekWG.Done()
 			e.mu.Lock()
 			latest := e.seekSeq
 			e.mu.Unlock()
 			if seq != latest {
 				return
 			}
-			_ = src.Seek(d)
+			err := src.Seek(d)
 			e.mu.Lock()
+			e.seekLanded = seq
 			if e.seekSeq == seq {
-				e.state = ui.VideoReady
+				if err != nil {
+					// A seek that did not land leaves the pictures where
+					// they were while the engine stands at the place
+					// asked for: say so, rather than wait for a picture
+					// that is not coming.
+					e.err = err
+					e.state = ui.VideoFailed
+				} else {
+					e.state = ui.VideoReady
+				}
 			}
 			e.mu.Unlock()
 		}()
@@ -1070,16 +1173,42 @@ func (e *Engine) SetLoop(v bool) {}
 
 // SetRate changes how fast the video plays.
 func (e *Engine) SetRate(r float64) {
+	if r <= 0 {
+		r = 1
+	}
 	e.mu.Lock()
+	if e.rate == r {
+		e.mu.Unlock()
+		return
+	}
+	// The place is read with the old rate, then anchored again under the
+	// new one: the sound the device holds was made at the old speed, and
+	// scaling the whole of its clock by the new one would move the playhead
+	// by however long the film had run. mpv rebuilds its filter chain for
+	// the same reason; a seek is this engine's way of starting the count
+	// again at the place showing.
+	pos := e.posLocked(time.Now())
+	hasSrc := e.src != nil
 	e.rate = r
+	e.mu.Unlock()
+	if hasSrc {
+		e.Seek(pos)
+	}
+}
+
+// SetVolume sets how loud the sound plays, from 0 to 1.
+func (e *Engine) SetVolume(v float64) {
+	e.mu.Lock()
+	e.volume = min(max(v, 0), 1)
 	e.mu.Unlock()
 }
 
-// SetVolume is not wired yet.
-func (e *Engine) SetVolume(v float64) {}
-
-// SetMuted is not wired yet.
-func (e *Engine) SetMuted(v bool) {}
+// SetMuted silences the sound, or plays it again.
+func (e *Engine) SetMuted(v bool) {
+	e.mu.Lock()
+	e.muted = v
+	e.mu.Unlock()
+}
 
 // Close ends the decoder and the sound. It waits for the threads that play
 // them: a device freed while its thread still fills it is a crash.
@@ -1088,8 +1217,16 @@ func (e *Engine) Close() error {
 	e.stopped = true
 	src, snd := e.src, e.snd
 	queue, current := e.queue, e.current
+	abort, finish := e.abortIO, e.finishIO
+	e.abortIO, e.finishIO = nil, nil
 	e.mu.Unlock()
+	// A read waiting on the network gives up at once: the threads below
+	// are waited on, and one waiting out a timeout would hold the close.
+	if abort != nil {
+		abort()
+	}
 	e.wg.Wait()
+	e.seekWG.Wait()
 	if src != nil {
 		pics := make([]ui.VideoPicture, 0, len(queue)+1)
 		for _, q := range queue {
@@ -1104,7 +1241,14 @@ func (e *Engine) Close() error {
 		snd.Close()
 	}
 	if src != nil {
-		return src.Close()
+		err := src.Close()
+		if finish != nil {
+			finish()
+		}
+		return err
+	}
+	if finish != nil {
+		finish()
 	}
 	return nil
 }
@@ -1145,7 +1289,19 @@ func (e *Engine) Stat(now time.Time) Stats {
 // audioLog writes a line for the log of the sound and the playback, where a
 // launch that plays none leaves what it got to.
 func audioLog(msg string) {
-	p := filepath.Join(os.TempDir(), "mygo-audio.log")
+	appendLog(filepath.Join(os.TempDir(), "mygo-audio.log"), msg)
+}
+
+// logMax is how large one of the logs may grow before it is started over:
+// a playback left running writes its frame and sync lines all day.
+const logMax = 4 << 20
+
+// appendLog adds a line to a log, and starts it over once it is too large
+// to read: the last playback is what the next one looks at.
+func appendLog(p, msg string) {
+	if fi, err := os.Stat(p); err == nil && fi.Size() > logMax {
+		_ = os.Remove(p)
+	}
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
@@ -1157,13 +1313,7 @@ func audioLog(msg string) {
 // syncLog writes the playhead and the picture's place side by side, so the
 // gap between the sound and the picture can be read after a playback.
 func syncLog(msg string) {
-	p := filepath.Join(os.TempDir(), "mygo-sync.log")
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "%s %s\n", time.Now().Format("15:04:05.000"), msg)
+	appendLog(filepath.Join(os.TempDir(), "mygo-sync.log"), msg)
 }
 
 // frameLog writes every picture the screen is given, with the wall clock it
@@ -1172,13 +1322,7 @@ func syncLog(msg string) {
 // only writes while a file asks for it, as a playback of twenty seconds is
 // five hundred lines.
 func frameLog(msg string) {
-	p := filepath.Join(os.TempDir(), "mygo-frames.log")
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "%s %s\n", time.Now().Format("15:04:05.000"), msg)
+	appendLog(filepath.Join(os.TempDir(), "mygo-frames.log"), msg)
 }
 
 // stepOf is how long a picture of the video shows, from the decoder.

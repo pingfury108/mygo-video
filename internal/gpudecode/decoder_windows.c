@@ -37,11 +37,37 @@ typedef struct {
 	AVCodecParameters *par;
 	void            *lastTex;   // the picture's texture, NV12
 	int              lastIndex; // its slice in the array
+	// lastMatrix and lastRange are the picture's own YUV setup, read from
+	// the frame: a processor told the wrong range lifts the blacks of a
+	// limited-range film, and one told the wrong matrix shifts its colors.
+	int              lastMatrix;
+	int              lastRange;
 	Conv             conv;      // NV12 to BGRA, on the GPU
 	int              convReady;
 	int              readErrs;  // reads in a row that failed
+	// abort is the engine's close flag: a read that waits on the network
+	// passes it to the protocol, and a window closing does not wait for the
+	// read to time out on its own.
+	void            *abort;
 	CRITICAL_SECTION cs;        // a seek and a decode must not mix
 } Dec;
+
+// dec_interrupted says the engine is closing, which the protocol asks on
+// every wait it makes.
+static int dec_interrupted(Dec *d) {
+	return d->abort && *(volatile LONG *)d->abort != 0;
+}
+
+static int dec_interrupt_cb(void *opaque) {
+	return dec_interrupted((Dec *)opaque);
+}
+
+// set_abort marks the engine closing. The flag is written from the window's
+// thread and read from the protocol's, so the exchange is the one Windows
+// makes atomic.
+static void set_abort(void *p) {
+	if (p) InterlockedExchange((volatile LONG *)p, 1);
+}
 
 // pick_d3d11 asks for Direct3D 11 pictures, and the system's own memory
 // where the hardware refuses them.
@@ -66,11 +92,12 @@ static void dec_free(Dec *d) {
 
 // dec_open reads the video at url, decoding with Direct3D 11 where it is.
 // It returns 0, or a negative step number that failed.
-static int dec_open(Dec *d, const char *url, const char *headers) {
+static int dec_open(Dec *d, const char *url, const char *headers, void *abort) {
 	DLOG("dec_open: %s\n", url);
 	int ni = avformat_network_init();
 	DLOG("network_init=%d protocol=%s\n", ni, avio_find_protocol_name("http://x") ? avio_find_protocol_name("http://x") : "(null)");
 	memset(d, 0, sizeof(*d));
+	d->abort = abort;
 	InitializeCriticalSection(&d->cs);
 	AVDictionary *opts = NULL;
 	if (headers && headers[0]) av_dict_set(&opts, "headers", headers, 0);
@@ -81,6 +108,13 @@ static int dec_open(Dec *d, const char *url, const char *headers) {
 	av_dict_set(&opts, "reconnect_streamed", "1", 0);
 	av_dict_set(&opts, "reconnect_delay_max", "4", 0);
 	av_dict_set(&opts, "rw_timeout", "15000000", 0);
+	d->fmt = avformat_alloc_context();
+	if (!d->fmt) {
+		av_dict_free(&opts);
+		return -1;
+	}
+	d->fmt->interrupt_callback.callback = dec_interrupt_cb;
+	d->fmt->interrupt_callback.opaque = d;
 	int r = avformat_open_input(&d->fmt, url, NULL, &opts);
 	av_dict_free(&opts);
 	if (r < 0) {
@@ -125,6 +159,7 @@ static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
 	// over the network it may wait seconds, and a section held for that long
 	// freezes the window and every seek behind it.
 	for (;;) {
+		if (dec_interrupted(d)) return -99;
 		EnterCriticalSection(&d->cs);
 		int r = avcodec_receive_frame(d->dec, d->frame);
 		if (r == 0) {
@@ -134,6 +169,20 @@ static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
 			// (vd_lavc.c: mp_pts_from_av(pic->best_effort_timestamp)).
 			*pts = d->frame->best_effort_timestamp;
 			if (*pts == AV_NOPTS_VALUE) *pts = d->frame->pts;
+			// DXVA2 carries two matrices, BT.601 and BT.709; a BT.2020
+			// SDR film reads closest as 709, and nothing here converts
+			// HDR to SDR. A frame that names none takes the one its size
+			// implies: HD and up is 709, SD is 601.
+			enum AVColorSpace spc = d->frame->colorspace;
+			if (spc == AVCOL_SPC_BT470BG || spc == AVCOL_SPC_SMPTE170M)
+				d->lastMatrix = 0;
+			else if (spc == AVCOL_SPC_UNSPECIFIED && d->par->height < 720)
+				d->lastMatrix = 0;
+			else
+				d->lastMatrix = 1;
+			// A frame that says nothing is taken as limited, which nearly
+			// every film is; JPEG range says the whole of the byte is used.
+			d->lastRange = d->frame->color_range == AVCOL_RANGE_JPEG ? 0 : 1;
 			if (d->frame->format == AV_PIX_FMT_D3D11) {
 				*tex = d->frame->data[0];
 				*index = (int)(intptr_t)d->frame->data[1];
@@ -157,6 +206,7 @@ static int dec_next(Dec *d, void **tex, int *index, int64_t *pts, int *fmt) {
 		// Reading is the slow part, and the section is open for it.
 		int rr = av_read_frame(d->fmt, d->pkt);
 		if (rr < 0 && rr != AVERROR_EOF) {
+			if (dec_interrupted(d)) return -99;
 			// A read that failed partway is not the end of the video: a
 			// source that stalls is tried again, and only a long run of
 			// failures gives up.
@@ -221,7 +271,8 @@ static int dec_picture(Dec *d, int slot, uintptr_t *handle, int *w, int *h) {
 		d->convReady = 1;
 	}
 	HANDLE hnd = NULL;
-	int rc = conv_blit(&d->conv, (ID3D11Texture2D *)d->lastTex, d->lastIndex, slot, &hnd);
+	int rc = conv_blit(&d->conv, (ID3D11Texture2D *)d->lastTex, d->lastIndex,
+		d->lastMatrix, d->lastRange, slot, &hnd);
 	LeaveCriticalSection(&d->cs);
 	if (rc) return rc;
 	*handle = (uintptr_t)hnd;

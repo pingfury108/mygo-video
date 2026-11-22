@@ -8,11 +8,20 @@ package gpudecode
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"time"
 	"unsafe"
 )
+
+// errNoAudio says the file has no audio stream, which is not a failure of
+// the picture: it plays without sound.
+var errNoAudio = errors.New("gpudecode: no audio stream")
+
+// errAudioSeek says the sound could not be moved to the place the picture
+// begins at, which would leave the two apart for the rest of the film.
+var errAudioSeek = errors.New("gpudecode: sound seek at open")
 
 // lockSoundThread pins the sound's thread and gives it a COM apartment of its
 // own. A goroutine moves between system threads, and CoInitializeEx belongs to
@@ -31,7 +40,7 @@ type Audio struct {
 }
 
 // openAudio reads the sound of url and asks the output device for its format.
-func openAudio(url string, headers []string, start time.Duration) (*Audio, error) {
+func openAudio(url string, headers []string, start time.Duration, rate float64, abort unsafe.Pointer) (*Audio, error) {
 	cu := C.CString(url)
 	defer C.free(unsafe.Pointer(cu))
 	var ch *C.char
@@ -40,11 +49,20 @@ func openAudio(url string, headers []string, start time.Duration) (*Audio, error
 		defer C.free(unsafe.Pointer(ch))
 	}
 	p := &Audio{}
-	var rate, channels C.int
-	if rc := C.audio_open(&p.a, cu, ch, C.int64_t(start.Microseconds()), &rate, &channels); rc != 0 {
+	var deviceRate, channels C.int
+	if rc := C.audio_open(&p.a, cu, ch, C.int64_t(start.Microseconds()), C.double(rate), abort, &deviceRate, &channels); rc != 0 {
+		// audio_open may have made the input, the decoder, or the device
+		// before the step that failed: close gives them all back.
+		C.audio_close(&p.a)
+		if rc == -3 {
+			return nil, errNoAudio
+		}
+		if rc == -19 {
+			return nil, errAudioSeek
+		}
 		return nil, fmt.Errorf("gpudecode: audio at step %d", int(rc))
 	}
-	p.rate = int(rate)
+	p.rate = int(deviceRate)
 	return p, nil
 }
 
@@ -83,4 +101,23 @@ func (p *Audio) Ended() bool { return C.audio_ended(&p.a) != 0 }
 // Seek goes to d in the sound, which the device plays from there.
 func (p *Audio) Seek(d time.Duration) int {
 	return int(C.audio_seek(&p.a, C.int64_t(d.Microseconds())))
+}
+
+// SetVolume sets the session's level, from 0 to 1.
+func (p *Audio) SetVolume(v float64) int {
+	return int(C.audio_set_volume(&p.a, C.float(v)))
+}
+
+// SetMuted silences the session, or plays it again.
+func (p *Audio) SetMuted(m bool) int {
+	n := 0
+	if m {
+		n = 1
+	}
+	return int(C.audio_set_mute(&p.a, C.int(n)))
+}
+
+// SetRate makes the film play r times as fast.
+func (p *Audio) SetRate(r float64) int {
+	return int(C.audio_set_speed(&p.a, C.double(r)))
 }

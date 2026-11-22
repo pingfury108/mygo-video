@@ -513,3 +513,116 @@ func TestPauseKeepsThePlaceItStopped(t *testing.T) {
 		t.Fatalf("playhead stood at %v after resuming", resumed)
 	}
 }
+
+// endingFrames is a decoder that reaches its end, and starts again where a
+// seek puts it: the film the player plays once more from the bar.
+type endingFrames struct {
+	mu    sync.Mutex
+	step  time.Duration
+	n     int
+	limit int
+}
+
+func (f *endingFrames) Next() (ui.VideoPicture, time.Duration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.n >= f.limit {
+		return ui.VideoPicture{}, 0, io.EOF
+	}
+	off := time.Duration(f.n) * f.step
+	f.n++
+	return ui.NewPixelsPicture(make([]byte, 4), 1, 1), off, nil
+}
+
+func (f *endingFrames) Seek(d time.Duration) error {
+	f.mu.Lock()
+	f.n = int(d / f.step)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *endingFrames) Step() time.Duration     { return f.step }
+func (f *endingFrames) Duration() time.Duration { return time.Duration(f.limit) * f.step }
+func (f *endingFrames) Size() (int, int)        { return 1, 1 }
+func (f *endingFrames) SetSkip(bool)            {}
+func (f *endingFrames) Release(ui.VideoPicture) {}
+func (f *endingFrames) Close() error            { return nil }
+
+// longer makes the film run past where it ended, as a seek into the part of
+// it the first play did not reach.
+func (f *endingFrames) longer(n int) {
+	f.mu.Lock()
+	f.limit = n
+	f.mu.Unlock()
+}
+
+// TestSeekAfterTheEndPlaysAgain is the bar taken back once the film ended:
+// the decoder still stands at its end, and must be moved off it rather than
+// left there with no thread to decode what follows.
+func TestSeekAfterTheEndPlaysAgain(t *testing.T) {
+	src := &endingFrames{step: 20 * time.Millisecond, limit: 5}
+	e := newEngine(src, &fakeClock{rate: 1})
+	defer e.Close()
+	e.Play()
+	waitState(t, e, ui.VideoEnded)
+
+	// The part the first play did not reach: the pictures after the seek
+	// must be ready before the film ends again.
+	src.longer(5000)
+	e.Seek(0)
+	e.Play()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, _, ok := e.Frame(time.Now()); ok {
+			if st, _ := e.State(); st == ui.VideoReady {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			st, err := e.State()
+			t.Fatalf("state %v err %v after a seek from the end", st, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestSeekWhilePausedShowsThePlace is the bar let go while the player is
+// paused: the picture must go to the new place, as mpv shows it, rather than
+// stand where it was until the play goes on.
+func TestSeekWhilePausedShowsThePlace(t *testing.T) {
+	src := &fakeFrames{step: 20 * time.Millisecond}
+	e := newEngine(src, &fakeClock{rate: 1})
+	defer e.Close()
+	e.Play()
+	time.Sleep(150 * time.Millisecond)
+	e.Pause()
+
+	e.Seek(30 * time.Second)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if pic, changed, ok := e.Frame(time.Now()); ok && changed && pic.Surface != nil {
+			if pos := e.Position(); pos >= 30*time.Second {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("picture stayed at %v after a seek to 30s while paused", e.Position())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitState(t *testing.T, e *Engine, want ui.VideoState) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if st, _ := e.State(); st == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			st, err := e.State()
+			t.Fatalf("state %v err %v, wanted %v", st, err, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

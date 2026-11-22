@@ -34,7 +34,7 @@ type Decoder struct {
 
 // Open reads the video at url, decoding with Direct3D 11 where it takes the
 // codec.
-func Open(url string, headers []string) (*Decoder, error) {
+func Open(url string, headers []string, abort unsafe.Pointer) (*Decoder, error) {
 	cu := C.CString(url)
 	defer C.free(unsafe.Pointer(cu))
 	var ch *C.char
@@ -44,13 +44,32 @@ func Open(url string, headers []string) (*Decoder, error) {
 	}
 	p := &Decoder{}
 	audioLog("open: dec_open begins")
-	rc := C.dec_open(&p.d, cu, ch)
+	rc := C.dec_open(&p.d, cu, ch, abort)
 	audioLog(fmt.Sprintf("open: dec_open rc=%d", int(rc)))
 	if rc != 0 {
+		// What the steps before the one that failed made — the D3D11
+		// device above all — is given back here: the engine never got a
+		// decoder to close.
+		C.dec_free(&p.d)
 		return nil, fmt.Errorf("gpudecode: open at step %d", int(rc))
 	}
 	audioLog("open: decoder made")
 	return p, nil
+}
+
+// newAbortFlag makes the flag the network reads of the picture and the sound
+// share: the engine sets it as it closes, and a read that would wait out its
+// timeout gives up at once.
+func newAbortFlag() unsafe.Pointer {
+	return C.calloc(1, 4)
+}
+
+func setAbortFlag(p unsafe.Pointer) {
+	C.set_abort(p)
+}
+
+func freeAbortFlag(p unsafe.Pointer) {
+	C.free(p)
 }
 
 // Size is the video's size in pixels.

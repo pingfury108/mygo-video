@@ -55,10 +55,11 @@ static int conv_init(Conv *c, ID3D11Device *dev, ID3D11DeviceContext *ctx, UINT 
 	if (FAILED(c->vdev->lpVtbl->CreateVideoProcessorEnumerator(c->vdev, &cd, &c->vpe))) return -7;
 	if (FAILED(c->vdev->lpVtbl->CreateVideoProcessor(c->vdev, c->vpe, 0, &c->vp))) return -8;
 
-	// BT.709, the matrix HEVC nearly always carries.
+	// The output is full-range BGRA: the input's range and matrix are set
+	// per picture in conv_blit, from the frame itself, and the processor
+	// expands it on the way into this texture.
 	D3D11_VIDEO_PROCESSOR_COLOR_SPACE cs;
 	ZeroMemory(&cs, sizeof(cs));
-	cs.YCbCr_Matrix = 1;
 	c->vctx->lpVtbl->VideoProcessorSetOutputColorSpace(c->vctx, c->vp, &cs);
 	c->w = w;
 	c->h = h;
@@ -122,15 +123,20 @@ static int conv_out_make(Conv *c, int slot) {
 // a slot, under that slot's keyed mutex, and returns its handle. The slot
 // belongs to the picture the engine queued, so a later decode cannot change
 // what an earlier picture shows.
-static int conv_blit(Conv *c, ID3D11Texture2D *nv12, int index, int slot, HANDLE *out) {
+static int conv_blit(Conv *c, ID3D11Texture2D *nv12, int index, int matrix, int range,
+	int slot, HANDLE *out) {
 	if (slot < 0 || slot >= CONV_SLOTS) return -8;
+	// The views are kept by slice, and there is one array slot for each of
+	// the 32 here: a picture of another slice is not converted rather than
+	// made into a view no one keeps.
+	if (index < 0 || index >= 32) return -8;
 	int rc = conv_out_make(c, slot);
 	if (rc) return rc;
 	ConvOut *o = &c->out[slot];
 	// The input views are one per slice of the array the decoder keeps its
 	// pictures in, which it reuses from frame to frame: made once, then kept.
 	ID3D11VideoProcessorInputView *in = NULL;
-	if (index >= 0 && index < 32 && c->inTex == nv12) {
+	if (c->inTex == nv12) {
 		in = c->inViews[index];
 	}
 	if (!in) {
@@ -150,15 +156,20 @@ static int conv_blit(Conv *c, ID3D11Texture2D *nv12, int index, int slot, HANDLE
 			}
 			c->inTex = nv12;
 		}
-		if (index >= 0 && index < 32) {
-			c->inViews[index] = in;
-		}
+		c->inViews[index] = in;
 	}
 
 	HRESULT hr = o->mutex->lpVtbl->AcquireSync(o->mutex, 0, 1000);
 	if (hr != S_OK && hr != WAIT_ABANDONED) {
 		return -3;
 	}
+	// The picture's own YUV setup: 16-235 or 0-255, BT.601 or BT.709.
+	// It is set per picture, since a file may change it between frames.
+	D3D11_VIDEO_PROCESSOR_COLOR_SPACE inColor;
+	ZeroMemory(&inColor, sizeof(inColor));
+	inColor.YCbCr_Matrix = matrix ? 1 : 0;
+	inColor.Nominal_Range = range ? 1 : 0;
+	c->vctx->lpVtbl->VideoProcessorSetStreamColorSpace(c->vctx, c->vp, 0, &inColor);
 	D3D11_VIDEO_PROCESSOR_STREAM st;
 	ZeroMemory(&st, sizeof(st));
 	st.Enable = TRUE;
