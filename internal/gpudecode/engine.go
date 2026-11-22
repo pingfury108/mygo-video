@@ -936,7 +936,10 @@ func (e *Engine) Stat(now time.Time) Stats {
 	defer e.mu.Unlock()
 	s := Stats{Queue: len(e.queue), State: e.state, Err: e.err}
 	if e.snd != nil {
-		s.Audio = e.snd.Position()
+		// What the engine plays by, not a read of the device: the device
+		// still reports the place before a seek until the seek reaches it,
+		// and this is called while holding the lock.
+		s.Audio = e.audioPos
 	}
 	if !e.clock.IsZero() {
 		s.Real = now.Sub(e.clock)
