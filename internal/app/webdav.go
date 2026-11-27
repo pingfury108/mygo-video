@@ -174,6 +174,10 @@ func (a *app) playWebDAV(it media.Item, fromStart bool) {
 // playWebDAVAt plays a video of the server from d: a remux that begins
 // there, for the files the player can't seek in itself.
 func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
+	if a.dataDirBusy {
+		a.say("正在复制数据，暂时不能播放")
+		return
+	}
 	a.closePlayer()
 	// A seek opens the stream afresh: the ways in the video took before
 	// belong to the playback that was left, not to this one.

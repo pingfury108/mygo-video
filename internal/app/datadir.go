@@ -1,9 +1,12 @@
 package app
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/egoist/mygo"
 )
@@ -55,6 +58,9 @@ func (a *app) tempDir() string {
 // changeDataDir asks where to keep the data, copies what the app has there,
 // and restarts into it.
 func (a *app) changeDataDir() {
+	if a.dataDirBusy {
+		return
+	}
 	go func() {
 		dirs, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 			Parent:      a.win,
@@ -67,41 +73,144 @@ func (a *app) changeDataDir() {
 			return
 		}
 		dir := dirs[0]
-		if dir == a.dataDir {
+		if sameDir(dir, a.dataDir) {
 			return
 		}
 		mygo.RunOnMain(func() {
+			if a.dataDirBusy {
+				return
+			}
 			res, _ := mygo.Dialog.Message(mygo.MessageOptions{
 				Parent:  a.win,
-				Message: "把现有的数据也移过去？",
-				Detail:  "「移动」复制观看记录、插件和设置；缩略图缓存会重新生成。",
-				Buttons: []string{"移动", "只切换", "取消"},
+				Message: "要把现有的数据一起带过去吗？",
+				Detail:  "复制会带过去观看记录、插件、插件数据和 WebDAV 缓存，源目录保留。移动会先复制并校验，重启后再删除旧目录里的应用数据、缓存、日志和临时文件；视频文件不会删除。两种操作都会停止播放，目标里的同名文件会被覆盖。",
+				Buttons: []string{"复制", "移动并删除旧数据", "只切换", "取消"},
 			})
 			switch res.Button {
 			case 0:
-				if err := copyDataDir(a.dataDir, dir); err != nil {
-					a.say("复制失败：%v", err)
-					return
-				}
-				a.useDataDir(dir)
+				a.copyDataDirAndRestart(dir, false)
 			case 1:
+				confirm, _ := mygo.Dialog.Message(mygo.MessageOptions{
+					Parent:             a.win,
+					Message:            "移动并删除旧数据？",
+					Detail:             "会先复制并校验应用数据，切换成功后自动重启，再清理旧目录。视频文件、未知文件和非本应用的数据不会删除。",
+					Buttons:            []string{"开始移动", "取消"},
+					DestructiveButtons: []int{0},
+				})
+				if confirm.Button == 0 {
+					a.copyDataDirAndRestart(dir, true)
+				}
+			case 2:
 				a.useDataDir(dir)
 			}
 		})
 	}()
 }
 
+// copyDataDirAndRestart copies the app's data, then points the app at the new
+// directory. Playback stays stopped until the app restarts.
+func (a *app) copyDataDirAndRestart(dir string, removeOld bool) {
+	if a.dataDirBusy {
+		return
+	}
+	from := a.dataDir
+	if err := validateDataDirCopy(from, dir); err != nil {
+		a.say("%v", err)
+		return
+	}
+	action := "复制"
+	if removeOld {
+		action = "移动"
+	}
+
+	a.dataDirBusy = true
+	a.dataDirStatus = "正在停止播放…"
+	a.playSeq++
+	a.stopPlaybackForMove()
+	a.closePluginsForMove()
+	if a.win != nil && a.win.IsFullScreen() {
+		a.win.SetFullScreen(false)
+	}
+	a.route = pageSettings
+	a.flushDataForMove()
+	a.dataDirStatus = "正在" + action + "应用数据…"
+	a.invalidate()
+
+	go func() {
+		err := copyDataDir(from, dir)
+		if err == nil {
+			err = verifyDataDirCopy(from, dir)
+		}
+		if err == nil && removeOld {
+			err = writeDataDirCleanup(dir, from)
+		}
+		mygo.RunOnMain(func() {
+			a.dataDirBusy = false
+			a.dataDirStatus = ""
+			if err != nil {
+				a.loadPlugins()
+				a.loadPluginCookies()
+				a.say("%s失败：%v", action, err)
+				a.invalidate()
+				return
+			}
+			if !a.useDataDir(dir) {
+				a.loadPlugins()
+				a.loadPluginCookies()
+				a.invalidate()
+			}
+		})
+	}()
+}
+
+// stopPlaybackForMove stops every way a video can be playing before its data
+// directory changes.
+func (a *app) stopPlaybackForMove() {
+	a.cancelWebDAVScan()
+	a.webdavPath = ""
+	if a.mpvProcess != nil {
+		_ = a.mpvProcess.Kill()
+		a.mpvProcess = nil
+	}
+	a.mpvPlaying = false
+	a.closePlayer()
+	a.stopLiveDanmaku()
+	a.releaseDisplayLock()
+}
+
+// closePluginsForMove stops plugin code that may still write plugin data while
+// it is copied.
+func (a *app) closePluginsForMove() {
+	for _, pe := range a.plugins {
+		if pe.p != nil {
+			pe.p.Close()
+			pe.p = nil
+		}
+	}
+}
+
+// flushDataForMove makes the copy include what the current run has in memory.
+func (a *app) flushDataForMove() {
+	a.saveProgress()
+	if a.store != nil {
+		a.store.SetVolume(a.volume)
+		a.store.Save()
+		a.saveWebDAVCache()
+	}
+}
+
 // useDataDir points the app at dir, and restarts into it.
-func (a *app) useDataDir(dir string) {
+func (a *app) useDataDir(dir string) bool {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		a.say("建不了这个目录：%v", err)
-		return
+		return false
 	}
 	if err := writeDataDirPointer(dir); err != nil {
 		a.say("记不住这个目录：%v", err)
-		return
+		return false
 	}
 	mygo.App.Relaunch()
+	return true
 }
 
 // resetDataDir goes back to the default directory.
@@ -115,10 +224,13 @@ func (a *app) resetDataDir() {
 
 // copyDataDir copies what a data directory holds besides caches.
 func copyDataDir(from, to string) error {
+	if err := validateDataDirCopy(from, to); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(to, 0o700); err != nil {
 		return err
 	}
-	for _, name := range []string{"state.json", "webdav-cache.json", "plugins", "plugin-data"} {
+	for _, name := range dataDirCopyNames {
 		src := filepath.Join(from, name)
 		if _, err := os.Stat(src); os.IsNotExist(err) {
 			continue
@@ -128,6 +240,47 @@ func copyDataDir(from, to string) error {
 		}
 	}
 	return nil
+}
+
+func validateDataDirCopy(from, to string) error {
+	if from == "" || to == "" {
+		return errors.New("数据目录为空")
+	}
+	if sameDir(from, to) || sameExistingDir(from, to) || withinDir(from, to) || withinDir(to, from) {
+		return errors.New("目标目录不能与当前数据目录相同或互相包含")
+	}
+	return nil
+}
+
+func sameExistingDir(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
+}
+
+// withinDir says whether child is inside parent, not parent itself.
+func withinDir(parent, child string) bool {
+	if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+		parent = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(child); err == nil {
+		child = resolved
+	}
+	p, c := filepath.Clean(parent), filepath.Clean(child)
+	if runtime.GOOS == "windows" {
+		p, c = strings.ToLower(p), strings.ToLower(c)
+	}
+	rel, err := filepath.Rel(p, c)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func copyPath(src, dst string) error {

@@ -48,6 +48,7 @@ func (a *app) view(c *ui.Context) {
 	}
 	a.installDialogView(c)
 	a.marketDialogView(c)
+	a.dataDirDialogView(c)
 }
 
 // windowChrome draws what belongs to the window rather than a page, over

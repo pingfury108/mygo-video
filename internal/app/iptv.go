@@ -200,6 +200,10 @@ func (a *app) channelCard(c *ui.Context, ch iptv.Channel) {
 // playIPTV plays a channel through the proxy, as a live stream that keeps
 // no place.
 func (a *app) playIPTV(ch iptv.Channel) {
+	if a.dataDirBusy {
+		a.say("正在复制数据，暂时不能播放")
+		return
+	}
 	a.closePlayer()
 	kind := "hls"
 	low := strings.ToLower(ch.URL)

@@ -32,6 +32,9 @@ func (a *app) mpvBin() string {
 // sound in step, in a window of its own: the player here decodes the picture
 // on the GPU already, but its sound has no such sure clock.
 func (a *app) playMPV(it media.Item, start time.Duration) bool {
+	if a.dataDirBusy {
+		return false
+	}
 	bin := a.mpvBin()
 	if bin == "" {
 		return false
@@ -44,6 +47,7 @@ func (a *app) playMPV(it media.Item, start time.Duration) bool {
 		return false
 	}
 	a.mpvPlaying = true
+	a.mpvProcess = cmd.Process
 	a.keepDisplayOn()
 	// mpv keeps its own display awake as long as it plays, but the app
 	// also does for the moments before mpv starts and after it quits.
@@ -72,7 +76,8 @@ func (a *app) playMPV(it media.Item, start time.Duration) bool {
 	go func() {
 		_ = cmd.Wait()
 		mygo.RunOnMain(func() {
-			if a.mpvPlaying {
+			if a.mpvProcess == cmd.Process {
+				a.mpvProcess = nil
 				a.mpvPlaying = false
 				a.releaseDisplayLock()
 			}

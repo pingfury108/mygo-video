@@ -92,6 +92,10 @@ type app struct {
 	dataDir string
 	// dataDirCustom says the listener chose where the data lives.
 	dataDirCustom bool
+	// dataDirBusy locks playback and quitting while the data directory is
+	// being copied and switched.
+	dataDirBusy   bool
+	dataDirStatus string
 	// retry is the stream to open again through ffmpeg when the player
 	// turns the first one down, and retryStage how far that went for an item:
 	// 0 untried, 1 remuxed, 2 transcoded.
@@ -271,6 +275,7 @@ type app struct {
 	// mpvPlaying says an mpv window outside this one plays a video, whose
 	// screen must be kept on too.
 	mpvPlaying bool
+	mpvProcess *os.Process
 
 	// quality is what to ask a plugin for, and playingQuality what it gave.
 	quality        string
@@ -344,7 +349,13 @@ func Run() error {
 		})
 	})
 	mygo.App.WhenReady(a.start)
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.shutdown() })
+	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		a.shutdown()
+		if a.dataDirBusy {
+			e.PreventDefault()
+			a.say("正在复制数据，完成前不能退出")
+		}
+	})
 	return mygo.App.Run()
 }
 
@@ -391,6 +402,7 @@ func (a *app) start() {
 	a.store = st
 	a.dataDir = dir
 	a.dataDirCustom = baseDirCustom
+	a.finishDataDirMove()
 	a.mark("ready", processStart)
 	a.volume = st.Volume()
 	a.avOffset = st.AVOffset()
@@ -844,6 +856,10 @@ func itemFromVideo(source string, v media.Video) media.Item {
 
 // play opens an item, from the start or where the listener stopped.
 func (a *app) play(it media.Item, fromStart bool) {
+	if a.dataDirBusy {
+		a.say("正在复制数据，暂时不能播放")
+		return
+	}
 	a.playSeq++
 	// A play chosen again is tried the whole way in again, the GPU first.
 	delete(a.webdavGPUFailed, it.ID)
@@ -1015,6 +1031,9 @@ func (a *app) playPlugin(it media.Item, fromStart bool) {
 }
 
 func (a *app) openPlayback(it media.Item, pb *media.Playback, err error, fromStart bool) {
+	if a.dataDirBusy {
+		return
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, plugin.ErrDRM):
@@ -1271,6 +1290,13 @@ func (a *app) retryPlayback() {
 }
 
 func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
+	if a.dataDirBusy {
+		if p != nil {
+			p.Close()
+		}
+		a.say("正在复制数据，暂时不能播放")
+		return
+	}
 	// A caller that already plays the video on the GPU passes its player; one
 	// that has the system's player gets the GPU one here, where it takes the
 	// codec.
