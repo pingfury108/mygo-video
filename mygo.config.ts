@@ -3,7 +3,7 @@ export default ({ command }: { command: string }) => ({
   name: "MyGo Video",
   identifier: "dev.pingfury.video",
   slug: "mygo-video",
-  version: "0.1.26",
+  version: "0.1.27",
   out: "build",
   updates: {
     publicKey: "CQ2rZMu1lVUSqWc89oe9v+e7ddSZGdUdDDMgiw98p7A=",

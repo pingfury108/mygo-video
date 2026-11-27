@@ -8,29 +8,36 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// pointerName is the pointer inside the data root, where startup reads it
-// before it opens the UI or creates any cache.
+// pointerName is the small bootstrap file in the default directory. It has to
+// live where startup can find it before it knows the chosen data directory.
 const pointerName = "data-dir.txt"
 
 func writeDataDirPointer(dir string) error {
+	return writeDataDirPointerAt(defaultBaseDirPath(), dir)
+}
+
+func writeDataDirPointerAt(baseDir, dir string) error {
 	if dir == "" {
 		return os.ErrInvalid
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, pointerName), []byte(dir+"\n"), 0o600)
+	if err := os.MkdirAll(baseDir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(baseDir, pointerName), []byte(dir+"\n"), 0o600)
 }
 
 func (a *app) clearDataDirPointer() error {
+	paths := []string{filepath.Join(defaultBaseDirPath(), pointerName)}
 	if a.dataDir != "" && !sameDir(a.dataDir, defaultBaseDirPath()) {
-		if err := os.Remove(filepath.Join(a.dataDir, pointerName)); err != nil && !os.IsNotExist(err) {
+		paths = append(paths, filepath.Join(a.dataDir, pointerName))
+	}
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-	}
-	legacy := filepath.Join(defaultBaseDirPath(), legacyPointerName)
-	if err := os.Remove(legacy); err != nil && !os.IsNotExist(err) {
-		return err
 	}
 	return nil
 }

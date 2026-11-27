@@ -34,16 +34,16 @@ func prepareBaseDirs() (string, bool, error) {
 
 	dir := resolveBaseDir(defaultBaseDir)
 	custom := !sameDir(dir, defaultBaseDir)
+	if custom {
+		if err := writeDataDirPointerAt(defaultBaseDir, dir); err != nil {
+			dir, custom = defaultBaseDir, false
+		}
+	}
 	if runtime.GOOS == "windows" {
 		cache, logs, tmp := filepath.Join(dir, "cache"), filepath.Join(dir, "logs"), filepath.Join(dir, "tmp")
 		for _, path := range []string{cache, logs, tmp} {
 			if err := os.MkdirAll(path, 0o700); err != nil {
 				return dir, custom, err
-			}
-		}
-		if custom {
-			if err := os.WriteFile(filepath.Join(dir, pointerName), []byte(dir+"\n"), 0o600); err != nil {
-				dir, custom = defaultBaseDir, false
 			}
 		}
 		os.Setenv("APPDATA", dir)
@@ -53,19 +53,15 @@ func prepareBaseDirs() (string, bool, error) {
 		mygo.App.SetPath(mygo.PathCache, filepath.Join(dir, "cache"))
 		mygo.App.SetPath(mygo.PathLogs, filepath.Join(dir, "logs"))
 		mygo.App.SetPath(mygo.PathTemp, filepath.Join(dir, "tmp"))
-	} else if custom {
-		if err := os.WriteFile(filepath.Join(dir, pointerName), []byte(dir+"\n"), 0o600); err != nil {
-			dir, custom = defaultBaseDir, false
-		}
 	}
 	mygo.App.SetPath(mygo.PathUserData, dir)
 	currentBaseDir = dir
 	return dir, custom, nil
 }
 
-// resolveBaseDir follows the pointer kept inside the data directory, after
-// falling back to the pointer older versions left in the default one. A
-// directory that has gone away is ignored, and a cycle cannot run forever.
+// resolveBaseDir follows the bootstrap pointer and any chain earlier versions
+// left behind. A directory that has gone away is ignored, and a cycle cannot
+// run forever.
 func resolveBaseDir(defaultDir string) string {
 	seen := map[string]bool{}
 	dir := defaultDir
@@ -75,9 +71,6 @@ func resolveBaseDir(defaultDir string) string {
 		}
 		seen[sameKey(dir)] = true
 		next, ok := pointerTarget(dir, pointerName)
-		if !ok {
-			next, ok = pointerTarget(defaultDir, legacyPointerName)
-		}
 		if !ok || sameDir(next, dir) {
 			break
 		}
@@ -152,6 +145,3 @@ func sameDir(a, b string) bool {
 func sameKey(path string) string {
 	return strings.ToLower(filepath.Clean(path))
 }
-
-// legacyPointerName keeps a first upgrade working before the pointer moved.
-const legacyPointerName = "data-dir.txt"
