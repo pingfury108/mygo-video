@@ -30,6 +30,9 @@ func writeDataDirPointerAt(baseDir, dir string) error {
 		return err
 	}
 	path := filepath.Join(baseDir, pointerName)
+	if b, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(b)) == dir {
+		return nil
+	}
 	part := path + ".part"
 	if err := os.WriteFile(part, []byte(dir+"\n"), 0o600); err != nil {
 		return err

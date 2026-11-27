@@ -402,6 +402,9 @@ func (a *app) start() {
 	if err != nil {
 		dir = baseDir()
 	}
+	if dataDirRecovered {
+		recoverNestedState(dir, defaultBaseDirPath())
+	}
 	st, err := store.Open(dir)
 	if err != nil {
 		log.Printf("store: %v", err)
@@ -425,6 +428,14 @@ func (a *app) start() {
 	if len(roots) == 0 {
 		roots = defaultRoots(dir)
 		st.SetRoots(roots)
+	} else if baseDirCustom {
+		// A move should not leave library roots pointing into the old
+		// default tree, where the app no longer keeps anything.
+		fixed := recoveredRoots(roots, nestedDataDirs(defaultBaseDirPath()), dir)
+		if !sameRoots(roots, fixed) {
+			roots = fixed
+			st.SetRoots(roots)
+		}
 	}
 	a.lib = local.New(roots)
 	a.thumbDir = filepath.Join(dir, "thumbs")

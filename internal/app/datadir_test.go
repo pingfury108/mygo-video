@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDataDirPointerIsFoundAfterRestart(t *testing.T) {
@@ -13,7 +14,7 @@ func TestDataDirPointerIsFoundAfterRestart(t *testing.T) {
 	if err := writeDataDirPointerAt(defaultDir, target); err != nil {
 		t.Fatal(err)
 	}
-	if got := resolveBaseDir(defaultDir); !sameDir(got, target) {
+	if got, _ := resolveBaseDir(defaultDir); !sameDir(got, target) {
 		t.Fatalf("resolveBaseDir() = %q, want %q", got, target)
 	}
 }
@@ -29,7 +30,7 @@ func TestDataDirPointerFollowsExistingChain(t *testing.T) {
 	if err := writeDataDirPointerAt(older, target); err != nil {
 		t.Fatal(err)
 	}
-	if got := resolveBaseDir(defaultDir); !sameDir(got, target) {
+	if got, _ := resolveBaseDir(defaultDir); !sameDir(got, target) {
 		t.Fatalf("resolveBaseDir() = %q, want %q", got, target)
 	}
 }
@@ -47,6 +48,65 @@ func TestDataDirPointerKeepsBootstrapFileSmall(t *testing.T) {
 	}
 	if string(b) != target+"\n" {
 		t.Fatalf("pointer = %q, want %q", b, target+"\n")
+	}
+}
+
+func TestResolveBaseDirRecoversNestedPointer(t *testing.T) {
+	defaultDir := t.TempDir()
+	nested := filepath.Join(defaultDir, baseName())
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	if err := writeDataDirPointerAt(nested, target); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, recovered := resolveBaseDir(defaultDir); !sameDir(got, target) || !recovered {
+		t.Fatalf("resolveBaseDir() = %q, want the nested pointer target %q", got, target)
+	}
+}
+
+func TestResolveBaseDirPrefersNewestPointer(t *testing.T) {
+	defaultDir := t.TempDir()
+	nested := filepath.Join(defaultDir, baseName())
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	older := t.TempDir()
+	newer := t.TempDir()
+	if err := writeDataDirPointerAt(defaultDir, older); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDataDirPointerAt(nested, newer); err != nil {
+		t.Fatal(err)
+	}
+	oldAt := time.Now().Add(-time.Hour)
+	newAt := time.Now()
+	if err := os.Chtimes(filepath.Join(defaultDir, pointerName), oldAt, oldAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(nested, pointerName), newAt, newAt); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, recovered := resolveBaseDir(defaultDir); !sameDir(got, newer) || !recovered {
+		t.Fatalf("resolveBaseDir() = %q, want the newest pointer target %q", got, newer)
+	}
+}
+
+func TestResolveBaseDirIgnoresNestedDefaultTarget(t *testing.T) {
+	defaultDir := t.TempDir()
+	nested := filepath.Join(defaultDir, baseName())
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDataDirPointerAt(defaultDir, nested); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := resolveBaseDir(defaultDir); !sameDir(got, defaultDir) {
+		t.Fatalf("resolveBaseDir() = %q, want the default directory %q", got, defaultDir)
 	}
 }
 

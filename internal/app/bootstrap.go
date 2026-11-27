@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 )
@@ -18,6 +19,7 @@ var (
 	defaultBaseDir            string
 	currentBaseDir            string
 	baseDirCustom             bool
+	dataDirRecovered          bool
 )
 
 // prepareBaseDirs chooses the root every kind of Windows app file uses. A
@@ -26,13 +28,14 @@ var (
 // before the single-instance lock, WebView2, the GPU and the updater. Other
 // systems keep MyGo's standard paths.
 func prepareBaseDirs() (string, bool, error) {
-	windowsSystemAPPDATA, _ = os.UserConfigDir()
+	windowsSystemAPPDATA, _ = systemConfigDir()
 	if runtime.GOOS == "windows" {
-		windowsSystemLocalAppData = os.Getenv("LOCALAPPDATA")
+		windowsSystemLocalAppData, _ = systemLocalAppDataDir()
 	}
 	defaultBaseDir = filepath.Join(windowsSystemAPPDATA, baseName())
 
-	dir := resolveBaseDir(defaultBaseDir)
+	dir, recovered := resolveBaseDir(defaultBaseDir)
+	dataDirRecovered = recovered
 	custom := !sameDir(dir, defaultBaseDir)
 	if custom {
 		if err := writeDataDirPointerAt(defaultBaseDir, dir); err != nil {
@@ -46,7 +49,9 @@ func prepareBaseDirs() (string, bool, error) {
 				return dir, custom, err
 			}
 		}
-		os.Setenv("APPDATA", dir)
+		// APPDATA is where the bootstrap pointer lives. Changing it here
+		// made a relaunch look for the pointer one level deeper, so leave
+		// it alone; everything the app writes uses the paths below.
 		os.Setenv("LOCALAPPDATA", filepath.Join(dir, "cache"))
 		os.Setenv("TMP", filepath.Join(dir, "tmp"))
 		os.Setenv("TEMP", filepath.Join(dir, "tmp"))
@@ -60,40 +65,101 @@ func prepareBaseDirs() (string, bool, error) {
 }
 
 // resolveBaseDir follows the bootstrap pointer and any chain earlier versions
-// left behind. A directory that has gone away is ignored, and a cycle cannot
-// run forever.
-func resolveBaseDir(defaultDir string) string {
-	seen := map[string]bool{}
+// left behind. It also recovers pointers that Windows builds left one level
+// deeper when a relaunch inherited the data directory as APPDATA. A directory
+// that has gone away is ignored, and a cycle cannot run forever.
+func resolveBaseDir(defaultDir string) (string, bool) {
+	best := defaultDir
+	var bestAt time.Time
+	bestDepth := 0
 	dir := defaultDir
+	seen := map[string]bool{}
+	for depth := range 16 {
+		if seen[sameKey(dir)] {
+			break
+		}
+		seen[sameKey(dir)] = true
+		target, at, ok := readDataDirPointer(dir)
+		if ok && dataDirTargetOK(defaultDir, target) &&
+			(at.After(bestAt) || (at.Equal(bestAt) && depth < bestDepth)) {
+			best, bestAt, bestDepth = target, at, depth
+		}
+		next := filepath.Join(dir, baseName())
+		if st, err := os.Stat(next); err != nil || !st.IsDir() {
+			break
+		}
+		dir = next
+	}
+	return followDataDirPointers(best, defaultDir), bestDepth > 0
+}
+
+// readDataDirPointer reads one bootstrap pointer and accepts only an existing
+// absolute directory.
+func readDataDirPointer(dir string) (string, time.Time, bool) {
+	path := filepath.Join(dir, pointerName)
+	st, err := os.Stat(path)
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	next := strings.TrimSpace(string(b))
+	if next == "" || !filepath.IsAbs(next) || sameDir(next, dir) {
+		return "", time.Time{}, false
+	}
+	target, err := os.Stat(next)
+	if err != nil || !target.IsDir() {
+		return "", time.Time{}, false
+	}
+	return next, st.ModTime(), true
+}
+
+// dataDirTargetOK keeps a recovered pointer from adopting one of the nested
+// default directories the old APPDATA bug created.
+func dataDirTargetOK(defaultDir, target string) bool {
+	if !filepath.IsAbs(target) || sameDir(target, defaultDir) {
+		return false
+	}
+	if withinDir(defaultDir, target) || hasRepeatedBaseName(target) {
+		return false
+	}
+	return true
+}
+
+func hasRepeatedBaseName(path string) bool {
+	dir := filepath.Clean(path)
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		if strings.EqualFold(filepath.Base(dir), baseName()) &&
+			strings.EqualFold(filepath.Base(parent), baseName()) {
+			return true
+		}
+		dir = parent
+	}
+}
+
+// followDataDirPointers follows a chain earlier versions left behind, without
+// letting it lead back into the default directory.
+func followDataDirPointers(start, defaultDir string) string {
+	seen := map[string]bool{}
+	dir := start
 	for range 8 {
 		if seen[sameKey(dir)] {
 			break
 		}
 		seen[sameKey(dir)] = true
-		next, ok := pointerTarget(dir, pointerName)
-		if !ok || sameDir(next, dir) {
+		next, _, ok := readDataDirPointer(dir)
+		if !ok || !dataDirTargetOK(defaultDir, next) {
 			break
 		}
 		dir = next
 	}
 	return dir
-}
-
-// pointerTarget reads one pointer file and accepts only a real directory.
-func pointerTarget(dir, name string) (string, bool) {
-	b, err := os.ReadFile(filepath.Join(dir, name))
-	if err != nil {
-		return "", false
-	}
-	next := strings.TrimSpace(string(b))
-	if next == "" {
-		return "", false
-	}
-	st, err := os.Stat(next)
-	if err != nil || !st.IsDir() {
-		return "", false
-	}
-	return next, true
 }
 
 // baseName is the directory every app kind uses. The development build
