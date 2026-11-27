@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.26
+
+- Windows 指定数据目录后，应用数据、缓存、日志和临时文件统一写在这个目录：
+  HLS 播放分片、插件安装解压、WebView2 数据、D3D ShaderCache 和图片缓存都不再
+  写系统的 `%LOCALAPPDATA%`。
+- 启动前完成目录重定向，保证 WebView2、GPU 渲染、单实例锁和更新器从一开始就
+  使用同一个数据根；HEVC 扩展检测仍读取系统真实 `%LOCALAPPDATA%`。
+- 数据目录指针迁移到数据目录内，同时兼容旧版 `%APPDATA%\MyGo Video\data-dir.txt`；
+  恢复默认目录时清理新旧指针。
+
 ## 0.1.25
 
 - 新增官方「插件市场」：应用直接读取最新 Release 里的 `plugins.json`，列出 B 站、
