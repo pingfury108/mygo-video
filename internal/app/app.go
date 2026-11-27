@@ -93,9 +93,11 @@ type app struct {
 	// dataDirCustom says the listener chose where the data lives.
 	dataDirCustom bool
 	// dataDirBusy locks playback and quitting while the data directory is
-	// being copied and switched.
-	dataDirBusy   bool
-	dataDirStatus string
+	// being copied and switched. dataDirQuitAllowed lets the relaunch after
+	// a successful copy through OnBeforeQuit while that lock stays in place.
+	dataDirBusy        bool
+	dataDirQuitAllowed bool
+	dataDirStatus      string
 	// retry is the stream to open again through ffmpeg when the player
 	// turns the first one down, and retryStage how far that went for an item:
 	// 0 untried, 1 remuxed, 2 transcoded.
@@ -350,11 +352,23 @@ func Run() error {
 	})
 	mygo.App.WhenReady(a.start)
 	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
-		a.shutdown()
-		if a.dataDirBusy {
+		// Saving here while a copy is being verified would change state.json
+		// under the copy: refuse the quit before touching any data.
+		if a.dataDirBusy && !a.dataDirQuitAllowed {
 			e.PreventDefault()
 			a.say("正在复制数据，完成前不能退出")
+			return
 		}
+		a.shutdown()
+	})
+	mygo.App.OnQuitCanceled(func() {
+		if !a.dataDirQuitAllowed {
+			return
+		}
+		// The pointer already names the new directory, so playback must stay
+		// locked, but the listener can quit again to let the switch take hold.
+		a.dataDirStatus = "重启被取消，请退出应用后再打开"
+		a.invalidate()
 	})
 	return mygo.App.Run()
 }
@@ -486,6 +500,14 @@ func (a *app) start() {
 		BackgroundColor:      "#0d0e11",
 		Content:              ui.View(a.view),
 	})
+	// The close button destroys the window before the quit listeners run:
+	// keep it, or a copy would leave the app running without a window.
+	a.win.OnClose(func(e *mygo.CloseEvent) {
+		if a.dataDirBusy && !a.dataDirQuitAllowed {
+			e.PreventDefault()
+			a.say("正在复制数据，完成前不能退出")
+		}
+	})
 	a.mark("window", processStart)
 	go a.scan()
 }
@@ -515,6 +537,11 @@ func defaultRoots(dataDir string) []string {
 func (a *app) scan() {
 	n := a.lib.Scan()
 	mygo.RunOnMain(func() {
+		// The data directory is being copied and verified: a scan result
+		// saved now would rewrite state.json under the copy.
+		if a.dataDirBusy {
+			return
+		}
 		if a.store != nil {
 			a.store.SetItems(a.lib.Items(), time.Now().UnixMilli())
 		}

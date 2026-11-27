@@ -112,6 +112,9 @@ func (a *app) reshowSource(id string) {
 
 // setPluginEnabled starts or stops a plugin's code.
 func (a *app) setPluginEnabled(pe *pluginEntry, on bool) {
+	if a.dataDirBusy {
+		return
+	}
 	if pe.busy {
 		return
 	}
@@ -182,6 +185,9 @@ func (a *app) enabledPlugins() int {
 
 // uninstallPlugin closes a plugin and removes it from disk.
 func (a *app) uninstallPlugin(pe *pluginEntry) {
+	if a.dataDirBusy {
+		return
+	}
 	was := a.sourceID()
 	id := pe.man.ID
 	if pe.p != nil {
@@ -389,6 +395,9 @@ func (a *app) installDir(src, origin string) (string, error) {
 // replace is set, an installed plugin of the same id gives way to the new
 // files; its data directory and whether it was on stay as they are.
 func (a *app) installDirAt(src, origin string, replace bool) (string, error) {
+	if a.dataDirBusy {
+		return "", fmt.Errorf("正在切换数据目录，暂时不能安装插件")
+	}
 	p, err := plugin.Load(src, a.pluginDataDir)
 	if err != nil {
 		return "", fmt.Errorf("这不是一个插件：%w", err)

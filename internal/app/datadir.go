@@ -29,7 +29,16 @@ func writeDataDirPointerAt(baseDir, dir string) error {
 	if err := os.MkdirAll(baseDir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(baseDir, pointerName), []byte(dir+"\n"), 0o600)
+	path := filepath.Join(baseDir, pointerName)
+	part := path + ".part"
+	if err := os.WriteFile(part, []byte(dir+"\n"), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(part, path); err != nil {
+		_ = os.Remove(part)
+		return err
+	}
+	return nil
 }
 
 func (a *app) clearDataDirPointer() error {
@@ -38,6 +47,7 @@ func (a *app) clearDataDirPointer() error {
 		paths = append(paths, filepath.Join(a.dataDir, pointerName))
 	}
 	for _, path := range paths {
+		_ = os.Remove(path + ".part")
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -83,7 +93,7 @@ func (a *app) changeDataDir() {
 			res, _ := mygo.Dialog.Message(mygo.MessageOptions{
 				Parent:  a.win,
 				Message: "要把现有的数据一起带过去吗？",
-				Detail:  "复制会带过去观看记录、插件、插件数据和 WebDAV 缓存，源目录保留。移动会先复制并校验，重启后再删除旧目录里的应用数据、缓存、日志和临时文件；视频文件不会删除。两种操作都会停止播放，目标里的同名文件会被覆盖。",
+				Detail:  "复制会带过去观看记录、插件、插件数据和 WebDAV 缓存，源目录保留。移动会先复制并逐字节校验，重启后再清理旧目录里的应用数据；缓存、日志和临时文件只在应用专属目录里删除，选择共享目录时会保留。视频文件、未知文件和非本应用的数据不会删除。两种操作都会停止播放，目标里的同名文件会被覆盖。",
 				Buttons: []string{"复制", "移动并删除旧数据", "只切换", "取消"},
 			})
 			switch res.Button {
@@ -101,6 +111,10 @@ func (a *app) changeDataDir() {
 					a.copyDataDirAndRestart(dir, true)
 				}
 			case 2:
+				if err := clearDataDirCleanup(dir); err != nil {
+					a.say("切换失败：%v", err)
+					return
+				}
 				a.useDataDir(dir)
 			}
 		})
@@ -122,6 +136,13 @@ func (a *app) copyDataDirAndRestart(dir string, removeOld bool) {
 	if removeOld {
 		action = "移动"
 	}
+	// A marker left by an earlier move belongs to that move. Drop it before
+	// copying so a later start never deletes a directory this copy means to
+	// keep.
+	if err := clearDataDirCleanup(dir); err != nil {
+		a.say("%s失败：%v", action, err)
+		return
+	}
 
 	a.dataDirBusy = true
 	a.dataDirStatus = "正在停止播放…"
@@ -141,20 +162,33 @@ func (a *app) copyDataDirAndRestart(dir string, removeOld bool) {
 		if err == nil {
 			err = verifyDataDirCopy(from, dir)
 		}
+		var digest string
+		if err == nil {
+			digest, err = verifyDataDirContents(from, dir)
+		}
 		if err == nil && removeOld {
-			err = writeDataDirCleanup(dir, from)
+			err = writeDataDirCleanup(dir, from, digest)
 		}
 		mygo.RunOnMain(func() {
-			a.dataDirBusy = false
-			a.dataDirStatus = ""
 			if err != nil {
+				a.dataDirBusy = false
+				a.dataDirStatus = ""
 				a.loadPlugins()
 				a.loadPluginCookies()
 				a.say("%s失败：%v", action, err)
 				a.invalidate()
 				return
 			}
+			// Keep playback locked until the process leaves this directory:
+			// the relaunch is queued, and a click in between must not start
+			// a video whose progress would be written to the old place.
+			a.dataDirStatus = "正在重启…"
+			a.dataDirQuitAllowed = true
+			a.invalidate()
 			if !a.useDataDir(dir) {
+				a.dataDirQuitAllowed = false
+				a.dataDirBusy = false
+				a.dataDirStatus = ""
 				a.loadPlugins()
 				a.loadPluginCookies()
 				a.invalidate()
@@ -205,6 +239,14 @@ func (a *app) useDataDir(dir string) bool {
 		a.say("建不了这个目录：%v", err)
 		return false
 	}
+	probe, err := os.CreateTemp(dir, ".mygo-video-write-")
+	if err != nil {
+		a.say("这个目录不能写入：%v", err)
+		return false
+	}
+	name := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(name)
 	if err := writeDataDirPointer(dir); err != nil {
 		a.say("记不住这个目录：%v", err)
 		return false
@@ -215,6 +257,13 @@ func (a *app) useDataDir(dir string) bool {
 
 // resetDataDir goes back to the default directory.
 func (a *app) resetDataDir() {
+	if a.dataDirBusy {
+		return
+	}
+	if err := clearDataDirCleanup(defaultBaseDirPath()); err != nil {
+		a.say("改不回去：%v", err)
+		return
+	}
 	if err := a.clearDataDirPointer(); err != nil {
 		a.say("改不回去：%v", err)
 		return
@@ -308,13 +357,23 @@ func copyPath(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, st.Mode().Perm())
+	part := dst + ".part"
+	out, err := os.OpenFile(part, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, st.Mode().Perm())
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		_ = out.Close()
+		_ = os.Remove(part)
 		return err
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		_ = os.Remove(part)
+		return err
+	}
+	if err := os.Rename(part, dst); err != nil {
+		_ = os.Remove(part)
+		return err
+	}
+	return nil
 }

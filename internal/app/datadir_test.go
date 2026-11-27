@@ -143,18 +143,18 @@ func TestRemoveOldDataDirKeepsVideosAndUnknownFiles(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "videos", "movie.mp4"), "video")
 	writeTestFile(t, filepath.Join(dir, "notes.txt"), "keep")
 
-	if err := removeOldDataDir(dir); err != nil {
+	kept, err := removeOldDataDir(dir)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !kept {
+		t.Error("cache folders in a shared directory should have been kept")
 	}
 	for _, name := range []string{
 		"state.json",
 		"webdav-cache.json",
 		"plugins",
 		"plugin-data",
-		"thumbs",
-		"cache",
-		"logs",
-		"tmp",
 		"diag.log",
 		"startup.log",
 		"startup-error.log",
@@ -163,9 +163,46 @@ func TestRemoveOldDataDirKeepsVideosAndUnknownFiles(t *testing.T) {
 			t.Errorf("%s should have been removed", name)
 		}
 	}
-	for _, name := range []string{"videos/movie.mp4", "notes.txt"} {
+	for _, name := range []string{
+		"videos/movie.mp4",
+		"notes.txt",
+		"thumbs/frame.bin",
+		"cache/data.bin",
+		"logs/diag.log",
+		"tmp/part",
+	} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s should have been kept: %v", name, err)
+		}
+	}
+}
+
+func TestRemoveOldDataDirCleansCachesInOwnedDir(t *testing.T) {
+	dir := t.TempDir()
+	oldDefault := defaultBaseDir
+	defaultBaseDir = dir
+	t.Cleanup(func() { defaultBaseDir = oldDefault })
+
+	for _, name := range []string{
+		"state.json",
+		"thumbs/frame.bin",
+		"cache/data.bin",
+		"logs/diag.log",
+		"tmp/part",
+	} {
+		writeTestFile(t, filepath.Join(dir, name), name)
+	}
+
+	kept, err := removeOldDataDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept {
+		t.Error("cache folders in the app's own directory should have been removed")
+	}
+	for _, name := range []string{"thumbs", "cache", "logs", "tmp"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s should have been removed", name)
 		}
 	}
 }
@@ -175,7 +212,14 @@ func TestFinishDataDirMoveRunsCleanupAfterRestart(t *testing.T) {
 	to := t.TempDir()
 	writeTestFile(t, filepath.Join(from, "state.json"), "old state")
 	writeTestFile(t, filepath.Join(from, "videos", "movie.mp4"), "video")
-	if err := writeDataDirCleanup(to, from); err != nil {
+	if err := copyDataDir(from, to); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := verifyDataDirContents(from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDataDirCleanup(to, from, digest); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,6 +234,70 @@ func TestFinishDataDirMoveRunsCleanupAfterRestart(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(to, dataDirCleanupName)); !os.IsNotExist(err) {
 		t.Error("cleanup marker was not removed")
+	}
+}
+
+func TestFinishDataDirMoveKeepsOldDataWhenTargetChanged(t *testing.T) {
+	from := t.TempDir()
+	to := t.TempDir()
+	writeTestFile(t, filepath.Join(from, "state.json"), "state")
+	if err := copyDataDir(from, to); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := dataDirDigest(to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDataDirCleanup(to, from, digest); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(to, "state.json"), "changed after the copy")
+
+	a := &app{dataDir: to}
+	a.finishDataDirMove()
+
+	if _, err := os.Stat(filepath.Join(from, "state.json")); err != nil {
+		t.Errorf("old data was removed after the target changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(to, dataDirCleanupName)); !os.IsNotExist(err) {
+		t.Error("cleanup marker was not removed")
+	}
+}
+
+func TestFinishDataDirMoveIgnoresUnknownSource(t *testing.T) {
+	from := t.TempDir()
+	to := t.TempDir()
+	writeTestFile(t, filepath.Join(from, "notes.txt"), "keep")
+	writeTestFile(t, filepath.Join(to, "state.json"), "state")
+	digest, err := dataDirDigest(to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDataDirCleanup(to, from, digest); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{dataDir: to}
+	a.finishDataDirMove()
+
+	if _, err := os.Stat(filepath.Join(from, "notes.txt")); err != nil {
+		t.Errorf("a directory this app did not own was changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(to, dataDirCleanupName)); !os.IsNotExist(err) {
+		t.Error("cleanup marker was not removed")
+	}
+}
+
+func TestVerifyDataDirContentsCatchesSameSizeChange(t *testing.T) {
+	from := t.TempDir()
+	to := t.TempDir()
+	writeTestFile(t, filepath.Join(from, "state.json"), "aaaa")
+	if err := copyDataDir(from, to); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(to, "state.json"), "bbbb")
+	if _, err := verifyDataDirContents(from, to); err == nil {
+		t.Fatal("verifyDataDirContents accepted changed bytes of the same size")
 	}
 }
 
