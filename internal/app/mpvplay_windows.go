@@ -46,9 +46,6 @@ func (a *app) playMPV(it media.Item, start time.Duration) bool {
 	if url == "" || it.Live {
 		return false
 	}
-	a.mpvPlaying = true
-	a.mpvProcess = cmd.Process
-	a.keepDisplayOn()
 	// mpv keeps its own display awake as long as it plays, but the app
 	// also does for the moments before mpv starts and after it quits.
 	args := []string{"--osc=yes", "--force-window=yes", "--title=" + it.Name}
@@ -71,6 +68,9 @@ func (a *app) playMPV(it media.Item, start time.Duration) bool {
 		a.diag("mpv: %v", err)
 		return false
 	}
+	a.mpvProcess = cmd.Process
+	a.mpvPlaying = true
+	a.keepDisplayOn()
 	a.diag("mpv: %s", url)
 	a.say("已在 mpv 窗口播放")
 	go func() {
