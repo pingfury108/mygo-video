@@ -586,6 +586,7 @@ func (a *app) togglePlay() {
 	switch {
 	case pl.Playing():
 		pl.Pause()
+		a.releaseDisplayLock()
 		a.saveProgress()
 	case pl.Ended():
 		if a.webdavHLS {
@@ -599,6 +600,7 @@ func (a *app) togglePlay() {
 		a.seekedAt = time.Now()
 	default:
 		pl.Play()
+		a.keepDisplayOn()
 	}
 	a.uiShown = time.Now()
 	a.uiHidden = false

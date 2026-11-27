@@ -268,6 +268,9 @@ type app struct {
 	lastSave     time.Time
 	fresh        bool
 	ended        bool
+	// mpvPlaying says an mpv window outside this one plays a video, whose
+	// screen must be kept on too.
+	mpvPlaying bool
 
 	// quality is what to ask a plugin for, and playingQuality what it gave.
 	quality        string
@@ -282,6 +285,11 @@ type app struct {
 	// window's edges.
 	pointerX, pointerY float32
 	pointerIn          bool
+
+	// displayLock keeps the screen on while video plays. It holds one
+	// request across playback, so a pause does not churn power requests.
+	displayLock func()
+	displaySeen bool
 
 	// The player's own state: subtitles read, speed, the episodes around
 	// what plays, and whether the controls are out of the way.
@@ -1288,6 +1296,10 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 	a.uiShown = time.Now()
 	a.seekedAt = time.Time{}
 	a.seekHold = false
+	// The built-in player is told to play below. The display lock is
+	// held from here, so the system does not see an idle desktop while
+	// the decoder and sound still start.
+	a.keepDisplayOn()
 	p.SetRate(a.rate)
 	p.SetVolume(a.volume)
 	if !fromStart {
@@ -1308,6 +1320,7 @@ func (a *app) leavePlayer() {
 		a.win.SetFullScreen(false)
 	}
 	a.closePlayer()
+	a.releaseDisplayLock()
 	a.seek = 0
 	a.drawer = false
 	a.uiHidden = false
@@ -1335,6 +1348,7 @@ func (a *app) closePlayer() {
 	a.player.Close()
 	a.player = nil
 	a.avTune = nil
+	a.releaseDisplayLock()
 }
 
 // saveProgress writes where the video stands, at most what changed.

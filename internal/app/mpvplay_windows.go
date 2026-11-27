@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
+
 	"mygo-video/internal/executil"
 	"mygo-video/internal/media"
 )
@@ -41,6 +43,10 @@ func (a *app) playMPV(it media.Item, start time.Duration) bool {
 	if url == "" || it.Live {
 		return false
 	}
+	a.mpvPlaying = true
+	a.keepDisplayOn()
+	// mpv keeps its own display awake as long as it plays, but the app
+	// also does for the moments before mpv starts and after it quits.
 	args := []string{"--osc=yes", "--force-window=yes", "--title=" + it.Name}
 	if start > 0 {
 		args = append(args, "--start="+fmt.Sprintf("%.3f", start.Seconds()))
@@ -65,6 +71,12 @@ func (a *app) playMPV(it media.Item, start time.Duration) bool {
 	a.say("已在 mpv 窗口播放")
 	go func() {
 		_ = cmd.Wait()
+		mygo.RunOnMain(func() {
+			if a.mpvPlaying {
+				a.mpvPlaying = false
+				a.releaseDisplayLock()
+			}
+		})
 	}()
 	return true
 }
