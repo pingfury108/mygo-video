@@ -295,7 +295,7 @@ func (a *app) installZipFrom(data []byte, label string) {
 	a.installErr = ""
 	a.invalidate()
 	go func() {
-		dir, err := os.MkdirTemp("", "mygo-video-plugin-")
+		dir, err := os.MkdirTemp(a.tempDir(), "mygo-video-plugin-")
 		if err != nil {
 			mygo.RunOnMain(func() { a.installFailed(err) })
 			return
@@ -343,7 +343,7 @@ func (a *app) installGitHub() {
 			mygo.RunOnMain(func() { a.installFailed(err) })
 			return
 		}
-		dir, err := os.MkdirTemp("", "mygo-video-plugin-")
+		dir, err := os.MkdirTemp(a.tempDir(), "mygo-video-plugin-")
 		if err != nil {
 			mygo.RunOnMain(func() { a.installFailed(err) })
 			return

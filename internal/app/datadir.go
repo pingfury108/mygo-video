@@ -4,61 +4,45 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/egoist/mygo"
 )
 
-// dataDirPointer is the file that says where the data lives. It stays in the
-// default place, so the app finds it before it has a data directory.
-func dataDirPointer() string {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(base, mygo.App.Name(), "data-dir.txt")
-}
-
-// readDataDirPointer is the directory the listener chose, or "".
-func readDataDirPointer() string {
-	path := dataDirPointer()
-	if path == "" {
-		return ""
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	dir := strings.TrimSpace(string(b))
-	if dir == "" {
-		return ""
-	}
-	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-		return ""
-	}
-	return dir
-}
+// pointerName is the pointer inside the data root, where startup reads it
+// before it opens the UI or creates any cache.
+const pointerName = "data-dir.txt"
 
 func writeDataDirPointer(dir string) error {
-	path := dataDirPointer()
-	if path == "" {
+	if dir == "" {
 		return os.ErrInvalid
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(dir+"\n"), 0o600)
+	return os.WriteFile(filepath.Join(dir, pointerName), []byte(dir+"\n"), 0o600)
 }
 
-func clearDataDirPointer() error {
-	path := dataDirPointer()
-	if path == "" {
-		return nil
+func (a *app) clearDataDirPointer() error {
+	if a.dataDir != "" && !sameDir(a.dataDir, defaultBaseDirPath()) {
+		if err := os.Remove(filepath.Join(a.dataDir, pointerName)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	legacy := filepath.Join(defaultBaseDirPath(), legacyPointerName)
+	if err := os.Remove(legacy); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
+}
+
+// tempDir keeps files that only matter while the app runs beside its data,
+// so playback and plugin installs use the drive the listener chose.
+func (a *app) tempDir() string {
+	dir := a.dataDir
+	if dir == "" {
+		dir = baseDir()
+	}
+	return filepath.Join(dir, "tmp")
 }
 
 // changeDataDir asks where to keep the data, copies what the app has there,
@@ -115,7 +99,7 @@ func (a *app) useDataDir(dir string) {
 
 // resetDataDir goes back to the default directory.
 func (a *app) resetDataDir() {
-	if err := clearDataDirPointer(); err != nil {
+	if err := a.clearDataDirPointer(); err != nil {
 		a.say("改不回去：%v", err)
 		return
 	}

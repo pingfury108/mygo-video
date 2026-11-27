@@ -318,6 +318,11 @@ func ReportFatal(err error) {
 
 // Run runs the app until the user quits.
 func Run() error {
+	_, custom, err := prepareBaseDirs()
+	if err != nil {
+		log.Printf("data dir: %v", err)
+	}
+	baseDirCustom = custom
 	if !mygo.App.RequestSingleInstanceLock() {
 		return nil
 	}
@@ -368,21 +373,24 @@ func setupMenu() {
 }
 
 func (a *app) start() {
-	if dir := readDataDirPointer(); dir != "" {
-		mygo.App.SetPath(mygo.PathUserData, dir)
-		a.dataDirCustom = true
-	}
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		dir = filepath.Join(os.TempDir(), "mygo-video")
+		dir = baseDir()
 	}
 	st, err := store.Open(dir)
 	if err != nil {
 		log.Printf("store: %v", err)
-		st, _ = store.Open(filepath.Join(os.TempDir(), "mygo-video"))
+		if dir != baseDir() {
+			dir = baseDir()
+			st, err = store.Open(dir)
+		}
+	}
+	if err != nil {
+		ReportFatal(fmt.Errorf("store: %w", err))
 	}
 	a.store = st
 	a.dataDir = dir
+	a.dataDirCustom = baseDirCustom
 	a.mark("ready", processStart)
 	a.volume = st.Volume()
 	a.avOffset = st.AVOffset()
@@ -416,12 +424,13 @@ func (a *app) start() {
 
 	a.proxy, _ = streamproxy.New()
 	streamproxy.Log = func(msg string) { a.diag("%s", msg) }
-	streamproxy.TempDir = filepath.Join(dir, "tmp")
-	_ = os.MkdirAll(streamproxy.TempDir, 0o700)
+	streamproxy.TempDir = a.tempDir()
 	// What a run that ended without closing its streams left behind.
-	if old, err := filepath.Glob(filepath.Join(streamproxy.TempDir, "mygo-video-hls-*")); err == nil {
-		for _, d := range old {
-			_ = os.RemoveAll(d)
+	for _, prefix := range []string{"mygo-video-hls-*", "mygo-video-plugin-*"} {
+		if old, err := filepath.Glob(filepath.Join(streamproxy.TempDir, prefix)); err == nil {
+			for _, d := range old {
+				_ = os.RemoveAll(d)
+			}
 		}
 	}
 	a.retryStage = map[string]int{}
@@ -1504,7 +1513,7 @@ func (a *app) hevcExtensionInstalled() bool {
 		return a.hevcExt
 	}
 	a.hevcExtChecked = true
-	dirs, _ := filepath.Glob(filepath.Join(os.Getenv("LOCALAPPDATA"), "Packages", "Microsoft.HEVCVideoExtension*"))
+	dirs, _ := filepath.Glob(filepath.Join(systemLocalAppData(), "Packages", "Microsoft.HEVCVideoExtension*"))
 	a.hevcExt = len(dirs) > 0
 	if a.hevcExt {
 		a.diag("hevc extension found: %s", dirs[0])

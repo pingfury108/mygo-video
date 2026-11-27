@@ -130,7 +130,7 @@ func (a *app) installMarket(m marketPlugin) {
 		var src string
 		if err == nil {
 			var dir string
-			dir, err = os.MkdirTemp("", "mygo-video-plugin-")
+			dir, err = os.MkdirTemp(a.tempDir(), "mygo-video-plugin-")
 			if err == nil {
 				defer os.RemoveAll(dir)
 				if err = unzip(data, dir); err == nil {

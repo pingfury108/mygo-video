@@ -271,7 +271,7 @@ macOS（开发版）：
 
 正式版把 `MyGo Video Dev` 换成 `MyGo Video`。
 
-Windows 上默认在 `%APPDATA%\MyGo Video`。想放到别的盘：设置 → 关于 → 更改…，选一个目录，app 会问要不要把现有数据一起移过去，然后重启。选择记在默认目录的 `data-dir.txt` 里，下次启动就换过去；「恢复默认」删掉这个文件即可。
+Windows 上默认在 `%APPDATA%\MyGo Video`。想放到别的盘：设置 → 关于 → 更改…，选一个目录，app 会问要不要把现有数据一起移过去，然后重启。选择记在这个目录的 `data-dir.txt` 里，下次启动就换过去；「恢复默认」删掉这个文件即可。Windows 会把数据、缓存、日志和临时文件都放在这个目录下（`cache/`、`logs/`、`tmp/`），播放和 WebView2 也不再写系统的 `%LOCALAPPDATA%`。
 
 ## 项目结构
 
