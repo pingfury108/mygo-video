@@ -811,7 +811,11 @@ func (a *app) switchSource(i int) {
 		a.iptvGroup = ""
 		a.iptvErr = ""
 	}
-	a.route = pageHome
+	// The phone's source pills sit on both home and library, and the tab bar
+	// can only agree with the page below it if the page stays put.
+	if !isPhone() {
+		a.route = pageHome
+	}
 	a.store.SetSource(a.sourceID())
 	a.invalidate()
 }
