@@ -13,6 +13,10 @@ import (
 // everything.
 func (a *app) view(c *ui.Context) {
 	a.applyTheme(c)
+	if isPhone() {
+		a.mobileView(c)
+		return
+	}
 	c.OnShortcut(ui.Cmd, ui.KeyF, func() {
 		if a.route == pagePlayer && a.player != nil {
 			return
@@ -54,7 +58,7 @@ func (a *app) view(c *ui.Context) {
 // windowChrome draws what belongs to the window rather than a page, over
 // whichever page is open. A full screen window has no controls to draw.
 func (a *app) windowChrome(c *ui.Context) {
-	if runtime.GOOS == "darwin" || a.win == nil || a.isFullScreen() {
+	if isPhone() || runtime.GOOS == "darwin" || a.win == nil || a.isFullScreen() {
 		return
 	}
 	a.windowButtons(c)
@@ -69,7 +73,7 @@ const (
 // that start at the window's top edge. It is zero in full screen and on
 // macOS, where the system draws the controls.
 func (a *app) windowChromeBottom() float32 {
-	if runtime.GOOS == "darwin" || a.win == nil || a.isFullScreen() {
+	if isPhone() || runtime.GOOS == "darwin" || a.win == nil || a.isFullScreen() {
 		return 0
 	}
 	return windowButtonHeight

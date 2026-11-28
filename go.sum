@@ -18,6 +18,14 @@ github.com/klauspost/compress v1.18.6 h1:2jupLlAwFm95+YDR+NwD2MEfFO9d4z4Prjl1XXD
 github.com/klauspost/compress v1.18.6/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/pingfury108/mygo v0.10.1-0.20261122024502-e14445e9bf75 h1:etDjNDsB9POi/9fEXXV0Y+rzggNGBKnPSDobiLeJdI0=
 github.com/pingfury108/mygo v0.10.1-0.20261122024502-e14445e9bf75/go.mod h1:Hw9sxdSQ4tHuehHw5Q6alR1qTS8kgv3oSFxEejg+7qo=
+github.com/pingfury108/mygo v0.10.1-0.20261128150207-8beb7b55c45f h1:RIAoTvPGnMGPLODgQqApJiXNBk/CezxoJC+W2NOwu/w=
+github.com/pingfury108/mygo v0.10.1-0.20261128150207-8beb7b55c45f/go.mod h1:Hw9sxdSQ4tHuehHw5Q6alR1qTS8kgv3oSFxEejg+7qo=
+github.com/pingfury108/mygo v0.10.1-0.20261128154844-b72ee6cd67fd h1:/30OzlRKCnFeNWYUtHCF1eB31dUSw4F7GKZZdOPd8As=
+github.com/pingfury108/mygo v0.10.1-0.20261128154844-b72ee6cd67fd/go.mod h1:Hw9sxdSQ4tHuehHw5Q6alR1qTS8kgv3oSFxEejg+7qo=
+github.com/pingfury108/mygo v0.10.1-0.20261128164800-4b9937c94458 h1:G2H775jVj0PcoBwV1pUpwJp8JvGvrYeAGoEz7aheEWY=
+github.com/pingfury108/mygo v0.10.1-0.20261128164800-4b9937c94458/go.mod h1:Hw9sxdSQ4tHuehHw5Q6alR1qTS8kgv3oSFxEejg+7qo=
+github.com/pingfury108/mygo v0.10.1-0.20261128165322-812efc7d5737 h1:qG9EJp+129u9XBswHqX68oojSFS94jZkTuEfB0EOnz0=
+github.com/pingfury108/mygo v0.10.1-0.20261128165322-812efc7d5737/go.mod h1:Hw9sxdSQ4tHuehHw5Q6alR1qTS8kgv3oSFxEejg+7qo=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/ulikunitz/xz v0.5.15 h1:9DNdB5s+SgV3bQ2ApL10xRc35ck0DuIX/isZvIk+ubY=

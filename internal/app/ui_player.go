@@ -61,7 +61,7 @@ func (a *app) playerPage(c *ui.Context) {
 	}
 	// A series goes on to its next episode when one ends. The player reports
 	// Ended late, or never, so the end is read off the clock as well.
-	if pl.Ready() && a.playbackEnded(pl) {
+	if pl.Ready() && a.playbackEnded() {
 		if !a.ended {
 			a.ended = true
 			a.playNext()
@@ -332,10 +332,7 @@ func playerButton(c *ui.Context, icon *ui.SVG, size float32, label string, activ
 // playhead is where the video plays, from the start of the file: a WebDAV
 // remux starts where it was asked to.
 func (a *app) playhead() time.Duration {
-	if a.player == nil {
-		return 0
-	}
-	return a.webdavBase + a.player.Position()
+	return a.webdavBase + a.playerPosition()
 }
 
 // playLength is how long the video is, which ffmpeg tells for a remux.
@@ -343,10 +340,7 @@ func (a *app) playLength() time.Duration {
 	if a.streamDuration > 0 {
 		return a.streamDuration
 	}
-	if a.player != nil {
-		return a.player.Duration()
-	}
-	return 0
+	return a.playerDuration()
 }
 
 // atEnd says the playhead reached the end of the video. The player's Ended
@@ -372,17 +366,16 @@ func (a *app) atEnd() bool {
 // playbackEnded says the video reached its end. An event playlist's own
 // end is where ffmpeg stopped writing for now, not where the file ends:
 // only the file's length can say that.
-func (a *app) playbackEnded(pl *ui.VideoPlayer) bool {
+func (a *app) playbackEnded() bool {
 	if a.eventHLS {
 		return a.atEnd()
 	}
-	return pl.Ended() || a.atEnd()
+	return a.playerEnded() || a.atEnd()
 }
 
 // seekTo moves to d, the whole file's time: a remux starts over there.
 func (a *app) seekTo(d time.Duration) {
-	pl := a.player
-	if pl == nil {
+	if !a.hasPlayer() {
 		return
 	}
 	if d < 0 {
@@ -399,7 +392,11 @@ func (a *app) seekTo(d time.Duration) {
 		return
 	}
 	a.seekHold = true
-	pl.Seek(d)
+	if a.mobile != nil {
+		a.mobile.Seek(d)
+	} else {
+		a.player.Seek(d)
+	}
 	a.seek = d.Seconds()
 	a.seekedAt = time.Now()
 	a.uiShown = time.Now()
@@ -435,7 +432,7 @@ func (a *app) seekBar(c *ui.Context) {
 	x, _, over := slider.PointerPosition()
 	b := slider.Bounds()
 	if over && b.W > 0 {
-		ms := int64(float64(x/b.W) * dur * float64(time.Millisecond))
+		ms := int64(float64(x/b.W) * dur * 1000)
 		slider = slider.Tooltip(media.HumanDuration(ms))
 	} else {
 		slider = slider.Tooltip("进度")
@@ -579,27 +576,39 @@ func playbackErrorText(err error) string {
 }
 
 func (a *app) togglePlay() {
-	pl := a.player
-	if pl == nil {
+	if !a.hasPlayer() {
 		return
 	}
 	switch {
-	case pl.Playing():
-		pl.Pause()
+	case a.playerPlaying():
+		if a.mobile != nil {
+			a.mobile.Pause()
+		} else {
+			a.player.Pause()
+		}
 		a.releaseDisplayLock()
 		a.saveProgress()
-	case pl.Ended():
+	case a.playerEnded():
 		if a.webdavHLS {
 			a.seekWebDAV(0)
 			return
 		}
-		pl.Seek(0)
-		pl.Play()
+		if a.mobile != nil {
+			a.mobile.Seek(0)
+			a.mobile.Play()
+		} else {
+			a.player.Seek(0)
+			a.player.Play()
+		}
 		a.seek = 0
 		a.seekHold = true
 		a.seekedAt = time.Now()
 	default:
-		pl.Play()
+		if a.mobile != nil {
+			a.mobile.Play()
+		} else {
+			a.player.Play()
+		}
 		a.keepDisplayOn()
 	}
 	a.uiShown = time.Now()
@@ -608,7 +617,7 @@ func (a *app) togglePlay() {
 }
 
 func (a *app) seekBy(d time.Duration) {
-	if a.player == nil {
+	if !a.hasPlayer() {
 		return
 	}
 	a.seekTo(a.playhead() + d)
@@ -722,7 +731,9 @@ func (a *app) playingSourceName() string {
 func (a *app) setRate(r float64) {
 	a.rate = r
 	a.store.SetRate(r)
-	if a.player != nil {
+	if a.mobile != nil {
+		a.mobile.SetRate(r)
+	} else if a.player != nil {
 		a.player.SetRate(r)
 	}
 	a.uiShown = time.Now()

@@ -3,7 +3,7 @@ export default ({ command }: { command: string }) => ({
   name: "MyGo Video",
   identifier: "dev.pingfury.video",
   slug: "mygo-video",
-  version: "0.1.29",
+  version: "0.1.30",
   out: "build",
   updates: {
     publicKey: "CQ2rZMu1lVUSqWc89oe9v+e7ddSZGdUdDDMgiw98p7A=",
@@ -14,6 +14,10 @@ export default ({ command }: { command: string }) => ({
   urlSchemes: [command === "dev" ? "mygo-video-dev" : "mygo-video"],
   macos: {
     minimumSystemVersion: "13.0",
+  },
+  android: {
+    // A LAN WebDAV server and the loopback stream proxy are plain HTTP.
+    cleartext: true,
   },
   linux: {
     comment: "A native video player, with plugins for more sources",

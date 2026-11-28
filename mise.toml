@@ -1,0 +1,7 @@
+[tools]
+go = "1.27.3"
+java = "temurin-21"
+
+[env]
+ANDROID_HOME = "/home/pfy/Android/Sdk"
+ANDROID_NDK_HOME = "/home/pfy/Android/Sdk/ndk/26.3.11579264"

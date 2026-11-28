@@ -38,6 +38,7 @@ func (a *app) makeWebDAV() {
 	a.webdavDirs = map[string]webdavDir{}
 	a.webdavIndexAt = time.Time{}
 	a.webdavAllItems = nil
+	a.mobileSearchIndex = false
 	if strings.TrimSpace(cfg.URL) == "" {
 		return
 	}
@@ -176,6 +177,10 @@ func (a *app) playWebDAV(it media.Item, fromStart bool) {
 func (a *app) playWebDAVAt(it media.Item, d time.Duration) {
 	if a.dataDirBusy {
 		a.say("正在复制数据，暂时不能播放")
+		return
+	}
+	if isPhone() {
+		a.playMobileWebDAVAt(it, d)
 		return
 	}
 	a.closePlayer()

@@ -251,6 +251,21 @@ type app struct {
 	// focusSearch asks the search page to focus its field as it builds.
 	focusSearch bool
 
+	// The phone shell: its tab, the sheets it shows, and the native player.
+	// Desktop pages keep using the fields around these untouched.
+	mobileTab          int
+	mobileFilter       int
+	mobileSearchSource int
+	mobileScrolls      [4]ui.ScrollState
+	mobilePlayerScroll ui.ScrollState
+	mobileWebdavSheet  bool
+	mobileEpisodes     bool
+	mobileImportBusy   bool
+	mobileImportText   string
+	mobileSearchIndex  bool
+	mobilePanscan      float64
+	mobile             *mobilePlayback
+
 	searchBox       ui.Handle
 	homeScroll      ui.ScrollState
 	libraryScroll   ui.ScrollState
@@ -335,8 +350,10 @@ func Run() error {
 	}
 	// The update window Sparkle made familiar, in native UI: it checks
 	// the GitHub releases of the app and installs a newer one.
-	mygo.Use(native.Plugin)
-	setupMenu()
+	if !isPhone() {
+		mygo.Use(native.Plugin)
+		setupMenu()
+	}
 	a := &app{danmakuOn: true}
 	// A second launch hands its command line over and exits; bring the
 	// window the first one holds back to the front, or the launch looks
@@ -351,6 +368,19 @@ func Run() error {
 		})
 	})
 	mygo.App.WhenReady(a.start)
+	if isPhone() {
+		mygo.Power.OnSuspend(func() {
+			mygo.RunOnMain(func() {
+				if a.mobile == nil {
+					return
+				}
+				a.mobile.Pause()
+				a.saveProgress()
+				a.releaseDisplayLock()
+				a.invalidate()
+			})
+		})
+	}
 	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
 		// Saving here while a copy is being verified would change state.json
 		// under the copy: refuse the quit before touching any data.
@@ -481,11 +511,19 @@ func (a *app) start() {
 	a.pluginDataDir = filepath.Join(dir, "plugin-data")
 	_ = os.MkdirAll(a.pluginsDir, 0o700)
 	a.rate = st.Rate()
-	a.loadPlugins()
-	a.loadPluginCookies()
+	if isPhone() {
+		// The phone build is the two sources it has a player for. Third-party
+		// plugins and live playlists stay on the desktop pages.
+		a.plugins = nil
+	} else {
+		a.loadPlugins()
+		a.loadPluginCookies()
+	}
 	a.source = a.sourceIndex(st.Source())
 	a.makeWebDAV()
-	a.makeIPTV()
+	if !isPhone() {
+		a.makeIPTV()
+	}
 	// What the last run found shows at once, while the new scan goes on.
 	if cached := st.Items(); len(cached) > 0 {
 		var at time.Time
@@ -519,6 +557,10 @@ func (a *app) start() {
 			a.say("正在复制数据，完成前不能退出")
 		}
 	})
+	if isPhone() {
+		mygo.SystemBars.SetStyle(mygo.BarStyleLight)
+		mygo.SystemBars.SetHidden(false)
+	}
 	a.mark("window", processStart)
 	go a.scan()
 }
@@ -527,6 +569,11 @@ func (a *app) start() {
 func defaultRoots(dataDir string) []string {
 	videos := filepath.Join(dataDir, "videos")
 	_ = os.MkdirAll(videos, 0o700)
+	if isPhone() {
+		// A phone cannot read the desktop home folders, and the picker hands
+		// copies to the app: the library is the app's own videos folder.
+		return []string{videos}
+	}
 	candidates := []string{videos}
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates,
@@ -641,6 +688,8 @@ func (a *app) openDetail(it media.Item) {
 	a.detailGen++
 	a.route = pageDetail
 	a.detailScroll = ui.ScrollState{}
+	a.mobilePlayerScroll = ui.ScrollState{}
+	a.mobileEpisodes = false
 	if it.Source != "" && it.Source != "webdav" && it.Source != "iptv" {
 		a.loadDetail(it)
 	}
@@ -908,7 +957,15 @@ func (a *app) play(it media.Item, fromStart bool) {
 		a.playWebDAV(it, fromStart)
 		return
 	case it.Source != "":
+		if isPhone() {
+			a.say("手机版只支持本地视频和 WebDAV")
+			return
+		}
 		a.playPlugin(it, fromStart)
+		return
+	}
+	if isPhone() {
+		a.playMobileLocal(it, fromStart)
 		return
 	}
 	a.closePlayer()
@@ -1386,6 +1443,9 @@ func (a *app) beginPlayback(it media.Item, p *ui.VideoPlayer, fromStart bool) {
 }
 
 func (a *app) leavePlayer() {
+	if isPhone() {
+		a.mobileSetPlayerMode(false)
+	}
 	// A window left in full screen keeps a style that has no frame to drag or
 	// resize by, and the pages after the player have no button to leave it
 	// with: it goes back to a window as the player does.
@@ -1413,21 +1473,26 @@ func (a *app) closePlayer() {
 		a.proxyToken = ""
 	}
 	a.retryStream = streamproxy.Stream{}
-	if a.player == nil {
+	if !a.hasPlayer() {
 		return
 	}
 	a.saveProgress()
 	a.stopLiveDanmaku()
-	a.player.Close()
-	a.player = nil
+	if a.mobile != nil {
+		a.mobile.Close()
+		a.mobile = nil
+	}
+	if a.player != nil {
+		a.player.Close()
+		a.player = nil
+	}
 	a.avTune = nil
 	a.releaseDisplayLock()
 }
 
 // saveProgress writes where the video stands, at most what changed.
 func (a *app) saveProgress() {
-	p := a.player
-	if p == nil || a.playing.ID == "" {
+	if !a.hasPlayer() || a.playing.ID == "" {
 		return
 	}
 	// A live channel has no place to keep.
@@ -1436,7 +1501,7 @@ func (a *app) saveProgress() {
 	}
 	// Before the first picture the engine has no position to keep, and a
 	// zero there would throw away where the listener actually was.
-	if !p.Ready() {
+	if !a.playerReady() {
 		return
 	}
 	pos := a.playhead().Milliseconds()
@@ -1476,7 +1541,7 @@ func (a *app) saveProgress() {
 
 // tick keeps the stored progress fresh while a video plays.
 func (a *app) tick() {
-	if a.player == nil {
+	if !a.hasPlayer() {
 		return
 	}
 	if time.Since(a.lastSave) >= 5*time.Second {
@@ -1493,7 +1558,9 @@ func (a *app) setVolume(v float64) {
 		v = 1
 	}
 	a.volume = v
-	if a.player != nil {
+	if a.mobile != nil {
+		a.mobile.SetVolume(v)
+	} else if a.player != nil {
 		a.player.SetVolume(v)
 	}
 }

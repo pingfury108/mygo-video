@@ -32,6 +32,15 @@ var dataDirOldFiles = []string{
 	"startup-error.log",
 }
 
+// dataDirOwnedFiles are app files at the root of a directory the app owns.
+// They are kept in a directory the listener may share with something else.
+var dataDirOwnedFiles = []string{
+	"window-state.json",
+	"window-state.json.part",
+	"updater.json",
+	"updater.json.part",
+}
+
 // dataDirCacheNames are directories the app uses, but a listener may have
 // chosen a shared folder where these names already belonged to something
 // else. They are removed only from a directory the app clearly owns.
@@ -357,6 +366,11 @@ func removeOldDataDir(dir string) (bool, error) {
 	}
 	kept := false
 	if ownsWholeDataDir(dir) {
+		for _, name := range dataDirOwnedFiles {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+				return false, fmt.Errorf("%s: %w", name, err)
+			}
+		}
 		for _, name := range dataDirCacheNames {
 			if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
 				return false, fmt.Errorf("%s: %w", name, err)

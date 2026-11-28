@@ -43,4 +43,7 @@ var (
 	iconDown     = strokeIcon(`<path d="m6 9 6 6 6-6"/>`)
 	iconArchive  = strokeIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v5M9 7h6M9 11h6M12 13v4"/>`)
 	iconGlobe    = strokeIcon(`<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/>`)
+	iconUser     = strokeIcon(`<circle cx="12" cy="8" r="3.6"/><path d="M4.8 20c.6-3.5 3.4-5.6 7.2-5.6s6.6 2.1 7.2 5.6"/>`)
+	iconPlus     = strokeIcon(`<path d="M12 5v14M5 12h14"/>`)
+	iconImport   = strokeIcon(`<path d="M12 4v10m0 0 4-4m-4 4-4-4"/><path d="M5 17.5V20h14v-2.5"/>`)
 )

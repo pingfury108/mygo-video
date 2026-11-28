@@ -23,6 +23,8 @@ type Data struct {
 	IPTV     IPTVConfig                `json:"iptv,omitempty"`
 	// Rate is the speed last chosen, for the next video too.
 	Rate float64 `json:"rate,omitempty"`
+	// KeepAwakeOff turns off holding the screen on while a video plays.
+	KeepAwakeOff bool `json:"keepAwakeOff,omitempty"`
 	// AVOffsetMs moves the picture against the sound, in milliseconds: a
 	// positive value shows the picture earlier, which a sound that runs ahead
 	// of it wants. It belongs to the machine's output, not to a video, so one
@@ -327,6 +329,20 @@ func (s *Store) Rate() float64 {
 func (s *Store) SetRate(r float64) {
 	s.mu.Lock()
 	s.data.Rate = r
+	s.mu.Unlock()
+	s.Save()
+}
+
+// KeepAwakeOff says whether playback leaves the screen to its idle timer.
+func (s *Store) KeepAwakeOff() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.KeepAwakeOff
+}
+
+func (s *Store) SetKeepAwakeOff(v bool) {
+	s.mu.Lock()
+	s.data.KeepAwakeOff = v
 	s.mu.Unlock()
 	s.Save()
 }

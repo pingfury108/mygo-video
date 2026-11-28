@@ -197,6 +197,8 @@ func TestRemoveOldDataDirKeepsVideosAndUnknownFiles(t *testing.T) {
 		"diag.log",
 		"startup.log",
 		"startup-error.log",
+		"window-state.json",
+		"updater.json",
 	} {
 		writeTestFile(t, filepath.Join(dir, name), name)
 	}
@@ -230,6 +232,8 @@ func TestRemoveOldDataDirKeepsVideosAndUnknownFiles(t *testing.T) {
 		"cache/data.bin",
 		"logs/diag.log",
 		"tmp/part",
+		"window-state.json",
+		"updater.json",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s should have been kept: %v", name, err)
@@ -249,6 +253,8 @@ func TestRemoveOldDataDirCleansCachesInOwnedDir(t *testing.T) {
 		"cache/data.bin",
 		"logs/diag.log",
 		"tmp/part",
+		"window-state.json",
+		"updater.json",
 	} {
 		writeTestFile(t, filepath.Join(dir, name), name)
 	}
@@ -260,7 +266,7 @@ func TestRemoveOldDataDirCleansCachesInOwnedDir(t *testing.T) {
 	if kept {
 		t.Error("cache folders in the app's own directory should have been removed")
 	}
-	for _, name := range []string{"thumbs", "cache", "logs", "tmp"} {
+	for _, name := range []string{"thumbs", "cache", "logs", "tmp", "window-state.json", "updater.json"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
 			t.Errorf("%s should have been removed", name)
 		}

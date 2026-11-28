@@ -1,0 +1,5 @@
+/build/
+/.mygo/
+/internal/gpudecode/ffmpeg/
+*.apk
+*.aab

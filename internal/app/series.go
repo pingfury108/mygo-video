@@ -12,6 +12,9 @@ import (
 // seriesOf lists the episodes of a video's series, in season and episode
 // order. A film has none.
 func (a *app) seriesOf(it media.Item) []media.Item {
+	if isPhone() {
+		return a.mobileSeriesOf(it)
+	}
 	if it.Series == "" {
 		return nil
 	}

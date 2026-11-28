@@ -4,10 +4,12 @@ import (
 	"context"
 	"log"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/videoplayer"
 	"github.com/egoist/mygo/ui"
 
 	"mygo-video/internal/media"
@@ -30,7 +32,7 @@ func (a *app) thumbnail(it media.Item) *ui.Bitmap {
 		a.thumbUsed[it.ID] = time.Now()
 		return b
 	}
-	if !a.thumbBusy[it.ID] && a.ffmpeg != "" {
+	if !a.thumbBusy[it.ID] && (a.ffmpeg != "" || runtime.GOOS == "android") {
 		a.thumbBusy[it.ID] = true
 		go a.loadThumb(it)
 	}
@@ -47,13 +49,13 @@ func (a *app) loadThumb(it media.Item) {
 	switch {
 	case it.Source == "webdav":
 		if _, err := os.Stat(path); err != nil {
-			if err := thumb.MakeURL(context.Background(), a.ffmpeg, it.RemoteID, a.webdavAuth(), path); err != nil {
+			if err := a.makeThumb(it, path); err != nil {
 				log.Printf("thumb %s: %v", it.Name, err)
 			}
 		}
 	default:
 		if st, err := os.Stat(path); err != nil || st.ModTime().Before(it.ModTime) {
-			if err := thumb.Make(context.Background(), a.ffmpeg, it.Path, path); err != nil {
+			if err := a.makeThumb(it, path); err != nil {
 				log.Printf("thumb %s: %v", it.Name, err)
 			}
 		}
@@ -75,6 +77,34 @@ func (a *app) loadThumb(it media.Item) {
 		}
 		a.invalidate()
 	})
+}
+
+// makeThumb takes a frame with ffmpeg when the machine has it, and with the
+// phone system's own frame reader when it does not.
+func (a *app) makeThumb(it media.Item, path string) error {
+	if runtime.GOOS == "android" {
+		var last error
+		for _, at := range []time.Duration{10 * time.Second, time.Second} {
+			var err error
+			if it.Source == "webdav" {
+				err = videoplayer.Thumbnail(context.Background(), it.RemoteID, a.webdavAuth(), at, thumb.Width, path)
+			} else {
+				err = videoplayer.Thumbnail(context.Background(), it.Path, nil, at, thumb.Width, path)
+			}
+			if err == nil {
+				if st, e := os.Stat(path); e == nil && st.Size() > 0 {
+					return nil
+				}
+				err = os.ErrNotExist
+			}
+			last = err
+		}
+		return last
+	}
+	if it.Source == "webdav" {
+		return thumb.MakeURL(context.Background(), a.ffmpeg, it.RemoteID, a.webdavAuth(), path)
+	}
+	return thumb.Make(context.Background(), a.ffmpeg, it.Path, path)
 }
 
 // evictThumbs drops the frames not shown for the longest, once there are

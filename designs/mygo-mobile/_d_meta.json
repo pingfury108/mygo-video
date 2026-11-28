@@ -1,0 +1,18 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "mobile": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-11-28T14:37:12.014Z",
+          "status": "needs-review"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-11-28T14:37:12.021Z",
+  "updatedAt": "2026-11-28T14:37:12.021Z"
+}
